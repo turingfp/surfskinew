@@ -57,6 +57,14 @@
     border-radius:6px; padding:5px 12px; font-size:13px; }
   .mapbtn:hover { border-color:var(--accent); }
   .mapbtn.active { background:var(--accent); color:#08110c; border-color:var(--accent); font-weight:700; }
+  .mp { margin-top:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .mp .ml { color:#7f93a4; font-size:12px; letter-spacing:2px; }
+  .mp input { background:#0e1620; border:1px solid #2f4150; border-radius:6px; color:#dff;
+    padding:5px 10px; font-family:inherit; font-size:13px; width:130px; }
+  .mp button { background:#16212c; border:1px solid #2f4150; border-radius:6px; color:#cfe;
+    padding:5px 14px; font-size:13px; cursor:pointer; }
+  .mp button:hover { border-color:var(--accent); }
+  .mpstat { color:#7f93a4; font-size:12px; }
   .play { margin-top:18px; text-align:center; color:var(--accent); font-size:14px; letter-spacing:2px; }
   #status { margin-top:10px; color:#ffb86b; font-size:12px; min-height:1em; text-align:center; }
   .tip { margin-top:14px; font-size:12px; color:#7f93a4; line-height:1.5; }
@@ -78,6 +86,7 @@
 
   <div id="topright">
     <div>TIME <b id="timer">00:00.00</b></div>
+    <div>PLAYERS <b id="peercount">1</b></div>
     <div>POS <b id="pos">0 0 0</b></div>
   </div>
 
@@ -100,6 +109,12 @@
         <a class="mapbtn" href="?map=surf_ski_2">surf_ski_2</a>
         <a class="mapbtn" href="?map=surf_green">surf_green</a>
       </div>
+      <div class="mp">
+        <span class="ml">MULTIPLAYER</span>
+        <input id="mp-room" type="text" placeholder="room name" value="public" maxlength="24" />
+        <button id="mp-join" type="button">Join</button>
+        <span id="mp-status" class="mpstat">offline</span>
+      </div>
       <p class="play">▶ CLICK or PRESS ENTER to play</p>
       <div id="status"></div>
       <p class="tip">Surf: ride the steep ramps. Hold one strafe key (A or D) and rotate the
@@ -121,7 +136,12 @@
     })();
   </script>
   <script type="importmap">
-  { "imports": { "three": "./vendor/three.module.js" } }
+  {
+    "imports": {
+      "three": "./vendor/three.module.js",
+      "trystero": "./vendor/trystero.js"
+    }
+  }
   </script>
   <script type="module" src="src/main.js"></script>
 </body>

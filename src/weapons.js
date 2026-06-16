@@ -57,6 +57,19 @@ export class Weapons {
     this._flash.renderOrder = 999;
     scene.add(this._flash);
     this._flashTtl = 0;
+    this.onShot = null; // called with shot data when the local player fires
+  }
+
+  // Play a remote player's shot: sound (quieter) + tracer from their eye.
+  remoteShot(data) {
+    if (!data || !data.o) return;
+    const spec = SPECS[data.w] || SPECS.pistol;
+    this._playRaw(spec.sound, spec.vol * 0.4);
+    const dirGS = angleVectors(data.p || 0, data.y || 0).forward;
+    const end = [data.o[0] + dirGS[0] * 8192, data.o[1] + dirGS[1] * 8192, data.o[2] + dirGS[2] * 8192];
+    let hit = end;
+    if (this.world) { const tr = this.world.traceHull(data.o, end, 1); if (tr.fraction < 1) hit = tr.endpos; }
+    this._tracer(data.o, hit, spec.tracer);
   }
 
   setWorld(w) { this.world = w; }
@@ -116,6 +129,7 @@ export class Weapons {
     this._playRaw(spec.sound, spec.vol);
     if (this.vm) this.vm.kick(spec.kick);
     this.camPunch += spec.kick * 0.012;
+    if (this.onShot) this.onShot({ o: opts.eyeGS.slice(), y: opts.yaw, p: opts.pitch, w: this.current });
 
     const dirGS = angleVectors(opts.pitch, opts.yaw).forward;
     const e3 = gs2three(opts.eyeGS[0], opts.eyeGS[1], opts.eyeGS[2]);

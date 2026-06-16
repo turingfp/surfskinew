@@ -8,6 +8,8 @@ import { buildLevel, buildSky, gs2three } from './render.js';
 import { createPlayerState, runTick, speed2d, waterMove, ladderMove } from './physics.js';
 import { Entities } from './entities.js';
 import { Weapons } from './weapons.js';
+import { Net } from './net.js';
+import { RemotePlayers } from './remote.js';
 import { Viewmodel } from './viewmodel.js';
 import { Input } from './input.js';
 import { HUD } from './hud.js';
@@ -86,12 +88,14 @@ async function tryLoadTexture(url) {
 
 // ---- World / player state --------------------------------------------------
 let world, state, input, hud, viewmodel, entities, weapons;
+let net, remotePlayers;
 let bounds, killZ, spawn;
 let prevOrigin;
 let accumulator = 0;
 let lastT = performance.now() / 1000;
 let runTime = 0;
 let runStarted = false;
+let netAcc = 0; // throttle state broadcasts to ~20 Hz
 
 // ---- Map selection (?map=surf_green) ---------------------------------------
 const MAPS = {
@@ -256,6 +260,16 @@ function frame(nowMs) {
     noclip: input.noclip,
   });
 
+  // multiplayer: interpolate remote avatars + broadcast our state at ~20 Hz
+  if (remotePlayers) remotePlayers.render();
+  if (net && net.connected) {
+    netAcc += dt;
+    if (netAcc >= 0.05) {
+      netAcc = 0;
+      net.broadcastState({ o: [state.origin[0], state.origin[1], state.origin[2]], y: input.yaw, p: pitchEff, w: input.weapon });
+    }
+  }
+
   renderer.info.reset();
   renderer.clear();
   renderer.render(scene, camera);
@@ -338,6 +352,39 @@ async function boot() {
       rifle: 'assets/sounds/rifle.wav',
       shotgun: 'assets/sounds/shotgun.wav',
     });
+
+    // ---- P2P multiplayer (serverless WebRTC via Trystero) ----
+    remotePlayers = new RemotePlayers(scene);
+    net = new Net();
+    net.on('state', (id, data) => remotePlayers.update(id, data));
+    net.on('leave', (id) => remotePlayers.remove(id));
+    net.on('shot', (id, data) => { if (weapons) weapons.remoteShot(data); });
+    net.on('count', (n) => { const el = document.getElementById('peercount'); if (el) el.textContent = n; });
+    weapons.onShot = (data) => { if (net.connected) net.broadcastShot(data); };
+
+    const joinBtn = document.getElementById('mp-join');
+    const roomInput = document.getElementById('mp-room');
+    const mpStatus = document.getElementById('mp-status');
+    const stop = (e) => e.stopPropagation();
+    [joinBtn, roomInput].forEach((el) => el && el.addEventListener('click', stop));
+    if (joinBtn) {
+      joinBtn.addEventListener('click', async () => {
+        if (net.connected) {
+          net.leave(); remotePlayers.clear();
+          joinBtn.textContent = 'Join'; if (mpStatus) mpStatus.textContent = 'offline';
+          return;
+        }
+        const room = (roomInput && roomInput.value.trim()) || 'public';
+        if (mpStatus) mpStatus.textContent = 'connecting…';
+        try {
+          await net.join(room);
+          joinBtn.textContent = 'Leave';
+          if (mpStatus) mpStatus.textContent = `room "${room}" · `;
+        } catch (err) {
+          if (mpStatus) mpStatus.textContent = `failed: ${err.message}`;
+        }
+      });
+    }
 
     window.addEventListener('resize', onResize);
     onResize();

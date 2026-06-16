@@ -97,6 +97,9 @@ export class Input {
   _fireActive() { this._onActive.forEach((f) => f(this.active)); }
 
   _key(e, down) {
+    // Ignore game keys while typing in a form field (e.g. the room name).
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
     const code = e.code;
     if (down && code === 'Escape') { this.stop(); return; }
     // Not playing yet? Any key (Enter/Space/etc.) starts — a reliable path that
