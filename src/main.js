@@ -436,6 +436,8 @@ async function boot() {
       setState: (o, v) => { if (o) state.origin = [...o]; if (v) state.velocity = [...v]; prevOrigin = copy(state.origin); },
       setAir: () => { state.onground = false; state.groundNormal = null; },
       setLook: (yaw, pitch) => { input.yaw = yaw; input.pitch = pitch; },
+      setVMEuler: (x, y, z) => viewmodel && viewmodel.setVMEuler(x, y, z),
+      vmReady: () => !!(viewmodel && Object.keys(viewmodel.weapons).length),
       tick: (cmd, dt = FIXED_DT) => { runTick(state, cmd, world, { autohop: false }, dt); return speed2d(state); },
       // Tick against a caller-supplied (e.g. open-air) world — isolates the
       // movement maths from level collision for testing.

@@ -32,6 +32,13 @@ export class Viewmodel {
     this.current = null;
     this.bobT = 0;
     this.recoil = 0; // 0..1, decays; kicks the gun back + up when firing
+    this._vmEuler = [-Math.PI / 2, 0.5, 0]; // orientation for MDL view models (tuned)
+  }
+
+  // Re-orient all loaded MDL weapons (used to tune the view-model orientation).
+  setVMEuler(x, y, z) {
+    this._vmEuler = [x, y, z];
+    for (const w of Object.values(this.weapons)) if (w.rotation) w.rotation.set(x, y, z);
   }
 
   kick(amount = 0.6) { this.recoil = Math.min(1.4, this.recoil + amount); }
@@ -57,20 +64,11 @@ export class Viewmodel {
   _makeMDLWeapon(data) {
     const inner = new THREE.Group();
     for (const g of data.groups) {
-      const n = g.positions.length / 3;
-      const pos = new Float32Array(n * 3);
-      const nrm = new Float32Array(n * 3);
-      // GoldSrc view space (X fwd, Y left, Z up) -> view-model camera space
-      // (looks -Z, +Y up, +X right):  three = (-Y, Z, -X)
-      for (let i = 0; i < n; i++) {
-        const mx = g.positions[i * 3], my = g.positions[i * 3 + 1], mz = g.positions[i * 3 + 2];
-        pos[i * 3] = -my; pos[i * 3 + 1] = mz; pos[i * 3 + 2] = -mx;
-        const ax = g.normals[i * 3], ay = g.normals[i * 3 + 1], az = g.normals[i * 3 + 2];
-        nrm[i * 3] = -ay; nrm[i * 3 + 1] = az; nrm[i * 3 + 2] = -ax;
-      }
+      // Build in raw model coords; orientation is applied via the wrap group
+      // rotation below (see _vmEuler), tuned to the GoldSrc view-model axes.
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(g.positions, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(g.normals, 3));
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2));
       let mat;
       if (g.tex) {
@@ -96,8 +94,7 @@ export class Viewmodel {
     wrap.add(inner);
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
     wrap.scale.setScalar(0.5 / maxDim);
-    // slight inward yaw + downward pitch so it reads as held, not floating
-    wrap.rotation.set(-0.04, 0.16, 0);
+    wrap.rotation.set(this._vmEuler[0], this._vmEuler[1], this._vmEuler[2]);
     return wrap;
   }
 
