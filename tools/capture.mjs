@@ -8,7 +8,11 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { execSync } = require('node:child_process');
-const { chromium } = require(join(execSync('npm root -g').toString().trim(), 'playwright'));
+function loadPlaywright() {
+  try { return require('playwright'); } catch { /* fall through */ }
+  return require(join(execSync('npm root -g').toString().trim(), 'playwright'));
+}
+const { chromium } = loadPlaywright();
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',

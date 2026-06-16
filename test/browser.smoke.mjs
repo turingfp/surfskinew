@@ -14,8 +14,12 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { execSync } = require('node:child_process');
-const globalRoot = execSync('npm root -g').toString().trim();
-const { chromium } = require(join(globalRoot, 'playwright'));
+function loadPlaywright() {
+  try { return require('playwright'); } catch { /* fall through */ }
+  try { return require(join(execSync('npm root -g').toString().trim(), 'playwright')); } catch { /* fall through */ }
+  throw new Error('playwright not found — run: npm i playwright && npx playwright install chromium');
+}
+const { chromium } = loadPlaywright();
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
