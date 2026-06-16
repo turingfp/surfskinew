@@ -32,7 +32,7 @@ export class Viewmodel {
     this.current = null;
     this.bobT = 0;
     this.recoil = 0; // 0..1, decays; kicks the gun back + up when firing
-    this._vmEuler = [-Math.PI / 2, 0.5, 0]; // orientation for MDL view models (tuned)
+    this._vmEuler = [0, 0, 0]; // fine-tune on top of the baked axis remap
   }
 
   // Re-orient all loaded MDL weapons (used to tune the view-model orientation).
@@ -64,11 +64,21 @@ export class Viewmodel {
   _makeMDLWeapon(data) {
     const inner = new THREE.Group();
     for (const g of data.groups) {
-      // Build in raw model coords; orientation is applied via the wrap group
-      // rotation below (see _vmEuler), tuned to the GoldSrc view-model axes.
+      // The CS v_ models' long axis (barrel/arm) is model Y, up is model Z.
+      // Map to the view-model camera (looks -Z, +Y up): forward(-Y)->-Z,
+      // up(Z)->+Y, so three = (-X, Z, Y). A small wrap euler then fine-tunes.
+      const n = g.positions.length / 3;
+      const pos = new Float32Array(n * 3);
+      const nrm = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const mx = g.positions[i * 3], my = g.positions[i * 3 + 1], mz = g.positions[i * 3 + 2];
+        pos[i * 3] = -mx; pos[i * 3 + 1] = mz; pos[i * 3 + 2] = my;
+        const ax = g.normals[i * 3], ay = g.normals[i * 3 + 1], az = g.normals[i * 3 + 2];
+        nrm[i * 3] = -ax; nrm[i * 3 + 1] = az; nrm[i * 3 + 2] = ay;
+      }
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(g.positions, 3));
-      geo.setAttribute('normal', new THREE.Float32BufferAttribute(g.normals, 3));
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2));
       let mat;
       if (g.tex) {
