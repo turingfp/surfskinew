@@ -1,0 +1,244 @@
+{
+  "instructions_for_ai": "Build a browser-native or native CS 1.6 style surf game. Replicate GoldSrc (Half-Life engine) player movement exactly as specified in the physics section. All constants are taken from Valve's official pm_shared.c and Quake-derived movement code. Implement the functions in the stated order per tick. Then generate the surf_green map per the map section. Do not invent alternate movement models. Determinism and the exact feel of GoldSrc air strafing are the acceptance bar.",
+
+  "engine_target": {
+    "reference_engine": "GoldSrc (Half-Life 1 engine, Counter-Strike 1.6)",
+    "source_of_truth": "ValveSoftware/halflife pm_shared/pm_shared.c, plus Quake QW/client/pmove.c lineage",
+    "units": {
+      "system": "GoldSrc units",
+      "unit_to_meter": 0.0254,
+      "note": "1 unit approx 1 inch. Player is 72 units tall standing. Speeds are units/second."
+    },
+    "coordinate_system": "right-handed, Z up. Course in surf_green runs along +X.",
+    "timestep": {
+      "original_behavior": "GoldSrc ran movement once per render frame, so physics were fps-coupled and exploitable via fps_max.",
+      "required_for_clone": "Fixed timestep. Run movement at a fixed rate decoupled from rendering.",
+      "recommended_hz": 100,
+      "recommended_dt_seconds": 0.01,
+      "subticking": "If render fps differs from physics hz, accumulate time and step the physics loop in fixed dt chunks. Interpolate rendering between physics states.",
+      "rationale": "Removes the fps-dependent speed bug, keeps deterministic, identical feel across machines, enables replays and server authority."
+    }
+  },
+
+  "physics": {
+    "constants": {
+      "sv_gravity": 800,
+      "sv_friction": 4,
+      "sv_stopspeed": 100,
+      "sv_accelerate_ground": 5,
+      "sv_airaccelerate": 10,
+      "sv_airaccelerate_surf_servers_typical": 100,
+      "sv_maxspeed": 320,
+      "sv_maxvelocity_default": 2000,
+      "sv_maxvelocity_surf_recommended": 3500,
+      "sv_stepsize": 18,
+      "air_wishspeed_cap": 30,
+      "air_wishspeed_cap_note": "Hardcoded clamp on wishspeed inside air acceleration. Source engine names it sv_air_max_wishspeed = 30. This is the single most important number for strafe speed gain.",
+      "ground_normal_z_threshold": 0.7,
+      "ground_normal_z_threshold_note": "If the surface normal.z is below 0.7 the surface is too steep to stand on, player stays airborne, no ground friction. acos(0.7) is about 45.57 degrees. Surf ramps must exceed this angle.",
+      "overbounce": 1.0,
+      "overbounce_formula": "1.0 + sv_bounce * (1 - surface_friction). sv_bounce default 1.0, surface_friction normally 1.0, so result is 1.0 for clean sliding.",
+      "stop_epsilon": 0.1,
+      "stop_epsilon_note": "After clipping, any velocity axis with magnitude below this is zeroed.",
+      "max_clip_planes": 5,
+      "num_bumps_per_move": 4,
+      "max_climb_speed_water": 100
+    },
+
+    "player_hull": {
+      "standing": { "mins": [-16, -16, -36], "maxs": [16, 16, 36], "size": [32, 32, 72] },
+      "ducking": { "mins": [-16, -16, -18], "maxs": [16, 16, 18], "size": [32, 32, 36] },
+      "view_offset_standing_z": 17,
+      "view_offset_ducking_z": 12,
+      "duck_enabled": true
+    },
+
+    "movement_loop_order_per_tick": [
+      "1. Read input: forwardmove, sidemove, view angles (yaw, pitch), buttons (jump, duck).",
+      "2. Build wishdir and wishspeed from movement keys projected onto view-forward and view-right vectors, with the z component of forward and right zeroed for horizontal movement.",
+      "3. Clamp wishspeed to sv_maxspeed.",
+      "4. CategorizePosition: trace down a small distance, decide onground vs airborne using normal.z >= 0.7 and vertical velocity test.",
+      "5. If onground and just landed, optionally apply landing logic. If jump pressed and onground, apply jump impulse and clear onground.",
+      "6. If onground: apply Friction, then ground Accelerate. If airborne: apply AirAccelerate (with the 30 cap).",
+      "7. Apply half of gravity to velocity before the move, the other half after (gravity split), matching GoldSrc.",
+      "8. FlyMove: move the player, tracing the path, and on each plane hit call ClipVelocity, then continue with remaining time. Up to num_bumps_per_move iterations against up to max_clip_planes planes.",
+      "9. CategorizePosition again to update ground state after moving.",
+      "10. Clamp every velocity axis to +/- sv_maxvelocity."
+    ],
+
+    "functions": {
+      "clip_velocity": {
+        "purpose": "Remove the component of velocity pointing into the surface, keep the tangential component. This is the core of surf.",
+        "signature": "clip_velocity(in_vel, normal, overbounce) -> out_vel",
+        "pseudocode": [
+          "backoff = dot(in_vel, normal) * overbounce",
+          "for axis in [x, y, z]:",
+          "    change = normal[axis] * backoff",
+          "    out_vel[axis] = in_vel[axis] - change",
+          "    if -STOP_EPSILON < out_vel[axis] < STOP_EPSILON: out_vel[axis] = 0",
+          "return out_vel"
+        ],
+        "why_it_causes_surf": "On a ramp the normal points sideways and up. Gravity drives velocity into the ramp each tick, clip_velocity strips out the into-ramp part and leaves velocity running along the ramp face. Repeated every tick this becomes a downhill slide that the player steers and accelerates with strafing."
+      },
+
+      "categorize_position": {
+        "purpose": "Decide whether the player is standing on walkable ground or is effectively airborne.",
+        "pseudocode": [
+          "if velocity.z > 180: onground = false; return",
+          "trace from origin straight down by a small amount (point just below feet)",
+          "if trace hits nothing: onground = false",
+          "else if trace.plane.normal.z < GROUND_NORMAL_Z_THRESHOLD (0.7): onground = false  // too steep, this is a surf ramp",
+          "else: onground = true; snap to ground; store ground plane"
+        ],
+        "why_it_matters": "A surface steeper than ~45.57 degrees fails the 0.7 test, so the player never enters the grounded state on a ramp. No ground friction is applied and air rules govern movement, which is what lets speed build."
+      },
+
+      "friction": {
+        "purpose": "Slow the player only when grounded. Never runs while on a surf ramp.",
+        "pseudocode": [
+          "speed = length(velocity)",
+          "if speed < 0.1: return",
+          "drop = 0",
+          "if onground:",
+          "    control = speed < sv_stopspeed ? sv_stopspeed : speed",
+          "    drop += control * sv_friction * dt",
+          "newspeed = max(speed - drop, 0)",
+          "velocity *= (newspeed / speed)"
+        ]
+      },
+
+      "ground_accelerate": {
+        "purpose": "Standard grounded acceleration toward wishdir.",
+        "pseudocode": [
+          "currentspeed = dot(velocity, wishdir)",
+          "addspeed = wishspeed - currentspeed",
+          "if addspeed <= 0: return",
+          "accelspeed = sv_accelerate_ground * dt * wishspeed",
+          "if accelspeed > addspeed: accelspeed = addspeed",
+          "velocity += accelspeed * wishdir"
+        ]
+      },
+
+      "air_accelerate": {
+        "purpose": "Airborne acceleration. The 30 cap on wishspeed is what makes air strafing gain speed without bound.",
+        "pseudocode": [
+          "wishspd = wishspeed",
+          "if wishspd > AIR_WISHSPEED_CAP (30): wishspd = 30",
+          "currentspeed = dot(velocity, wishdir)   // projection of velocity onto wish direction",
+          "addspeed = wishspd - currentspeed",
+          "if addspeed <= 0: return",
+          "accelspeed = sv_airaccelerate * wishspeed * dt   // note: full wishspeed here, not the clamped wishspd",
+          "if accelspeed > addspeed: accelspeed = addspeed",
+          "velocity += accelspeed * wishdir"
+        ],
+        "why_strafing_gains_speed": "currentspeed is velocity projected onto wishdir, capped against 30. If wishdir sits at a small angle off the velocity vector, the projection stays under 30 even when true speed is large, so addspeed stays positive and the engine keeps adding a small off-axis velocity vector each tick. Vectorially this rotates and lengthens the velocity. The technique: hold one strafe key (A or D) and rotate the mouse the same direction in sync, keeping wishdir just off-axis from velocity so the cap never saturates."
+      },
+
+      "fly_move": {
+        "purpose": "Move and slide along surfaces, clipping against each plane hit.",
+        "pseudocode": [
+          "time_left = dt",
+          "primal_velocity = velocity",
+          "numplanes = 0",
+          "for bump in range(NUM_BUMPS = 4):",
+          "    if length(velocity) == 0: break",
+          "    end = origin + velocity * time_left",
+          "    trace from origin to end with player hull",
+          "    if trace.fraction > 0: origin = trace.endpos; numplanes = 0",
+          "    if trace.fraction == 1: break   // moved full distance, done",
+          "    time_left -= time_left * trace.fraction",
+          "    store trace.plane.normal in planes[]; numplanes++",
+          "    for each stored plane: velocity = clip_velocity(velocity, plane, overbounce)",
+          "    if numplanes hits a crease, clip along the crease (cross product of two planes) per Quake FlyMove",
+          "    guard: if velocity reverses into primal_velocity (dot < 0), zero it to avoid jitter"
+        ]
+      },
+
+      "jump": {
+        "pseudocode": [
+          "if onground and jump_pressed and not jump_held_last_tick:",
+          "    velocity.z = sqrt(2 * sv_gravity * 45)   // approx 268.3 ups for a 45 unit jump",
+          "    onground = false"
+        ],
+        "note": "Bunnyhopping in pure GoldSrc is limited by the same air rules. Surf relies on ramp riding more than bhop, but air accel applies identically off ramp ends."
+      }
+    },
+
+    "surf_explanation_plain": "Surf was never designed. It falls out of three existing rules. (1) ClipVelocity deflects you along any surface instead of stopping you. (2) CategorizePosition refuses to treat surfaces steeper than 0.7 normal.z as ground, so you get no friction and stay in air physics on a ramp. (3) AirAccelerate lets you add up to a 30-projected wishspeed of velocity per the air rules, and because that cap is on the projection rather than total speed, strafing off-axis lets you accelerate indefinitely. Gravity feeds velocity into the ramp, ClipVelocity converts it to downhill slide, strafing adds and steers speed."
+  },
+
+  "map": {
+    "name": "surf_green",
+    "tier": 1,
+    "difficulty": "beginner",
+    "purpose": "Teach the basic strafe rhythm. Wide forgiving ramps, no early death pits, alternating lean to force both strafe directions.",
+    "theme": {
+      "palette": "green",
+      "ramps": "semi-transparent green glass so the next ramp is visible through the current one",
+      "ground": "grass texture",
+      "sky": "pale green skybox",
+      "lighting": "bright, flat, high visibility"
+    },
+    "structure": {
+      "layout": "linear, single path, runs along +X",
+      "segments": 6,
+      "ramp_pairing": "alternating left-lean and right-lean, so the player must use both A+mouse-left and D+mouse-right",
+      "difficulty_curve": "ramp width shrinks and air gaps grow monotonically across the 6 segments"
+    },
+    "global_geometry": {
+      "ramp_angle_degrees_range": [45, 50],
+      "ramp_angle_note": "Must exceed 45.57 degrees so normal.z < 0.7 and the ramp surfs.",
+      "ramp_length_units": 1024,
+      "ramp_height_units": 768,
+      "ramp_width_units_by_segment": [256, 256, 224, 192, 176, 160],
+      "gap_between_segments_units": [0, 0, 128, 256, 320, 384],
+      "gap_note": "First two segments share an edge (gap 0) so the player feels the slide before making any air gap.",
+      "safety_floor": {
+        "enabled": true,
+        "texture": "grass",
+        "z_below_lowest_ramp_units": 512,
+        "spans_entire_course": true,
+        "on_contact": "teleport player back to the last reached checkpoint with zeroed velocity"
+      }
+    },
+    "lean_pattern": ["left", "right", "left", "right", "left", "right"],
+    "entities": {
+      "start_zone": {
+        "type": "platform_plus_trigger",
+        "platform_size_units": [512, 512, 16],
+        "spawn_origin_units": [0, 0, 64],
+        "trigger": "timer_start on exit, also a speed-boost-free clean start"
+      },
+      "checkpoints": {
+        "count": 3,
+        "placement": "one after every pair of ramps (after segments 2, 4, 6)",
+        "function": "set respawn point for safety-floor falls"
+      },
+      "end_zone": {
+        "type": "platform_plus_trigger",
+        "platform_size_units": [512, 512, 16],
+        "trigger": "timer_stop, clear visual finish marker"
+      }
+    },
+    "ramp_placement_rule": "Place segment N as an inclined box (brush) of length 1024, width per ramp_width_units_by_segment[N], thickness 16. Tilt it to the segment angle and roll it to its lean direction so the player slides along the up-facing glass face. Position each segment downrange (+X) from the previous by ramp_length_units plus gap_between_segments_units[N]. Drop each segment's start height so the player keeps net forward speed. The up-facing normal of every ramp must have normal.z < 0.7.",
+    "tuning_for_this_map": {
+      "sv_airaccelerate": 100,
+      "sv_maxvelocity": 3500,
+      "rationale": "Beginner maps run higher airaccelerate so new players gain speed forgivingly, and a raised velocity cap so good strafes are not clipped."
+    },
+    "validation": [
+      "A player who holds only forward and never strafes should slide down a ramp and survive on the safety floor, never instantly die.",
+      "Each ramp's up-facing surface normal.z is < 0.7.",
+      "Clearing all 6 segments with correct strafing should be achievable by a beginner within a few attempts.",
+      "Falling off any ramp lands on grass and respawns at the last checkpoint."
+    ]
+  },
+
+  "acceptance_criteria": [
+    "Standing on a flat floor applies friction and stops the player. Standing on a >45.57 degree ramp never grounds the player and applies no friction.",
+    "ClipVelocity on a ramp converts downward velocity into along-ramp velocity, producing a stable slide under gravity.",
+    "Air strafing (one strafe key plus synced mouse turn) increases total speed beyond 30 ups, capped only by sv_maxvelocity.",
+    "Physics are deterministic at the fixed timestep, identical regardless of render fps.",
+    "surf_green is completable, forgiving, and teaches both strafe directions."
+  ]
+}

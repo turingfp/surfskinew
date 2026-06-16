@@ -1,0 +1,5 @@
+Weapon models by Quaternius — License: CC0 1.0 Universal (public domain).
+Source: https://quaternius.com  (downloaded via https://poly.pizza)
+  pistol.glb   — "Pistol"   by Quaternius (CC0)
+  rifle.glb    — "Assault Rifle" by Quaternius (CC0)
+  shotgun.glb  — "Shotgun"  by Quaternius (CC0)

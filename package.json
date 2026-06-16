@@ -1,0 +1,16 @@
+{
+  "name": "surf-ski-2",
+  "version": "1.0.0",
+  "description": "Browser-native CS 1.6 / GoldSrc surf clone running the real surf_ski_2.bsp with authentic pm_shared movement.",
+  "type": "module",
+  "scripts": {
+    "start": "node serve.mjs",
+    "serve": "node serve.mjs",
+    "test": "node test/physics.test.mjs",
+    "test:browser": "node test/browser.smoke.mjs",
+    "capture": "node tools/capture.mjs",
+    "gen-texture": "node tools/gen_texture.mjs"
+  },
+  "license": "MIT",
+  "private": true
+}

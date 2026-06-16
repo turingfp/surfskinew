@@ -1,0 +1,4 @@
+Kenney "Prototype Textures" — License: CC0 1.0 Universal (public domain).
+Source: https://kenney.nl/assets/prototype-textures
+Mirror used: https://github.com/Calinou/kenney-prototype-textures
+Files here are a curated subset, renamed <color>_<NN>.png.
