@@ -315,8 +315,8 @@ async function boot() {
 
     world = new CollisionWorld(bsp);
     spawn = parseSpawn(bsp);
-    entities = new Entities(bsp);
-    console.log(`[surf] entities: pushes=${entities.pushes.length} teleports=${entities.teleports.length} ladders=${entities.ladders.length} waters=${entities.waters.length}`);
+    entities = new Entities(bsp, world);
+    console.log(`[surf] solid models=${world.solidModels.length} entities: pushes=${entities.pushes.length} teleports=${entities.teleports.length} ladders=${entities.ladders.length} waters=${entities.waters.length}`);
 
     input = new Input();
     input.attach(canvas);

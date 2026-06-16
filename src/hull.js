@@ -13,12 +13,32 @@
 import { CONTENTS, DIST_EPSILON } from './constants.js';
 import { dot, copy } from './vec.js';
 
+// Brush-entity classes that are solid to the player (so we collide with them).
+// Surf ramps are frequently compiled as func_wall, which is why world-only
+// collision let players fall through them.
+const SOLID_CLASSES = new Set([
+  'func_wall', 'func_wall_toggle', 'func_detail', 'func_door', 'func_door_rotating',
+  'func_button', 'func_breakable', 'func_pushable', 'func_train', 'func_plat',
+  'func_rotating', 'func_conveyor', 'func_tracktrain', 'func_guntarget', 'func_vehicle',
+]);
+
 export class CollisionWorld {
   constructor(bsp) {
     this.planes = bsp.planes;
     this.clip = bsp.clipnodes;
     this.models = bsp.models;
     this._head = 0;
+
+    // worldspawn (model 0) plus every solid brush entity model
+    this.solidModels = [0];
+    if (bsp.entities) {
+      for (const e of bsp.entities) {
+        if (e.model && e.model[0] === '*' && SOLID_CLASSES.has(e.classname)) {
+          const i = parseInt(e.model.slice(1), 10);
+          if (this.models[i] && !this.solidModels.includes(i)) this.solidModels.push(i);
+        }
+      }
+    }
   }
 
   headnode(hullIndex, modelIndex = 0) {
@@ -43,9 +63,9 @@ export class CollisionWorld {
     return this.hullPointContents(this.headnode(hullIndex, modelIndex), p);
   }
 
-  // Sweep the player point from start to end. Returns
+  // Sweep the player point against ONE model. Returns
   // { fraction, endpos, plane:{normal,dist}|null, startsolid, allsolid }.
-  traceHull(start, end, hullIndex = 1, modelIndex = 0) {
+  _traceModel(start, end, hullIndex, modelIndex) {
     const head = this.headnode(hullIndex, modelIndex);
     this._head = head;
     const trace = {
@@ -58,6 +78,23 @@ export class CollisionWorld {
     this.recursiveHullCheck(head, 0, 1, start, end, trace);
     if (trace.fraction === 1) trace.endpos = copy(end);
     return trace;
+  }
+
+  // Sweep the player against worldspawn + all solid brush models, returning the
+  // closest impact (so func_wall surf ramps, doors, etc. all collide).
+  traceHull(start, end, hullIndex = 1) {
+    const combined = { fraction: 1, endpos: copy(end), plane: null, startsolid: false, allsolid: false };
+    for (const mi of this.solidModels) {
+      const tr = this._traceModel(start, end, hullIndex, mi);
+      if (tr.startsolid) combined.startsolid = true;
+      if (tr.allsolid) combined.allsolid = true;
+      if (tr.fraction < combined.fraction) {
+        combined.fraction = tr.fraction;
+        combined.endpos = tr.endpos;
+        combined.plane = tr.plane;
+      }
+    }
+    return combined;
   }
 
   recursiveHullCheck(num, p1f, p2f, p1, p2, trace) {
