@@ -357,11 +357,20 @@ async function boot() {
     // First-person weapon viewmodel (CC0 Quaternius guns). Non-blocking:
     // if it fails to load, the game still runs without a weapon.
     viewmodel = new Viewmodel();
-    viewmodel.load({
-      pistol: 'assets/models/pistol.glb',
-      rifle: 'assets/models/rifle.glb',
-      shotgun: 'assets/models/shotgun.glb',
-    }).then((names) => console.log(`[surf] viewmodels loaded: ${names.join(', ') || 'none'}`));
+    viewmodel.loadMDLWeapons({
+      pistol: 'assets/models/cs/v_usp.mdl',
+      rifle: 'assets/models/cs/v_m4a1.mdl',
+      shotgun: 'assets/models/cs/v_m3.mdl',
+    }).then(async (names) => {
+      if (!names.length) {
+        await viewmodel.load({
+          pistol: 'assets/models/pistol.glb', rifle: 'assets/models/rifle.glb', shotgun: 'assets/models/shotgun.glb',
+        });
+        console.log('[surf] viewmodels: GLB fallback');
+      } else {
+        console.log(`[surf] viewmodels (CS .mdl): ${names.join(', ')}`);
+      }
+    });
 
     // Firing: real CS 1.6 weapon sounds + hitscan tracers + recoil.
     weapons = new Weapons(scene, viewmodel);

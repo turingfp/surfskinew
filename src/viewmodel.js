@@ -4,6 +4,7 @@
 
 import * as THREE from '../vendor/three.module.js';
 import { GLTFLoader } from '../vendor/jsm/loaders/GLTFLoader.js';
+import { loadMDL } from './mdl.js';
 
 export class Viewmodel {
   constructor() {
@@ -34,6 +35,67 @@ export class Viewmodel {
   }
 
   kick(amount = 0.6) { this.recoil = Math.min(1.4, this.recoil + amount); }
+
+  // Load real CS 1.6 StudioModel (.mdl) view models.
+  async loadMDLWeapons(map) {
+    for (const [name, url] of Object.entries(map)) {
+      try {
+        const data = await loadMDL(url);
+        const weapon = this._makeMDLWeapon(data);
+        weapon.visible = false;
+        this.rig.add(weapon);
+        this.weapons[name] = weapon;
+      } catch (e) {
+        console.warn(`[viewmodel] MDL load failed ${name}:`, e.message || e);
+      }
+    }
+    const first = Object.keys(this.weapons)[0];
+    if (first) this.select(first);
+    return Object.keys(this.weapons);
+  }
+
+  _makeMDLWeapon(data) {
+    const inner = new THREE.Group();
+    for (const g of data.groups) {
+      const n = g.positions.length / 3;
+      const pos = new Float32Array(n * 3);
+      const nrm = new Float32Array(n * 3);
+      // GoldSrc (X fwd, Y left, Z up) -> three (x, z, -y)
+      for (let i = 0; i < n; i++) {
+        pos[i * 3] = g.positions[i * 3]; pos[i * 3 + 1] = g.positions[i * 3 + 2]; pos[i * 3 + 2] = -g.positions[i * 3 + 1];
+        nrm[i * 3] = g.normals[i * 3]; nrm[i * 3 + 1] = g.normals[i * 3 + 2]; nrm[i * 3 + 2] = -g.normals[i * 3 + 1];
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2));
+      let mat;
+      if (g.tex) {
+        const tex = new THREE.DataTexture(g.tex.rgba, g.tex.w, g.tex.h, THREE.RGBAFormat);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.needsUpdate = true;
+        mat = new THREE.MeshLambertMaterial({
+          map: tex, transparent: g.tex.masked, alphaTest: g.tex.masked ? 0.5 : 0, side: THREE.DoubleSide,
+        });
+      } else {
+        mat = new THREE.MeshLambertMaterial({ color: 0x888888 });
+      }
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.frustumCulled = false;
+      inner.add(mesh);
+    }
+    // center + scale + orient like a held first-person weapon
+    const box = new THREE.Box3().setFromObject(inner);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    inner.position.sub(center);
+    const wrap = new THREE.Group();
+    wrap.add(inner);
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    wrap.scale.setScalar(0.5 / maxDim);
+    wrap.rotation.set(0, -Math.PI / 2, 0); // forward (+X) -> into screen (-Z)
+    return wrap;
+  }
 
   async load(map) {
     const loader = new GLTFLoader();
