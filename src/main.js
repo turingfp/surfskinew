@@ -7,6 +7,7 @@ import { CollisionWorld } from './hull.js';
 import { buildLevel, buildSky, gs2three } from './render.js';
 import { createPlayerState, runTick, speed2d, waterMove, ladderMove } from './physics.js';
 import { Entities } from './entities.js';
+import { Weapons } from './weapons.js';
 import { Viewmodel } from './viewmodel.js';
 import { Input } from './input.js';
 import { HUD } from './hud.js';
@@ -84,14 +85,13 @@ async function tryLoadTexture(url) {
 }
 
 // ---- World / player state --------------------------------------------------
-let world, state, input, hud, viewmodel, entities;
+let world, state, input, hud, viewmodel, entities, weapons;
 let bounds, killZ, spawn;
 let prevOrigin;
 let accumulator = 0;
 let lastT = performance.now() / 1000;
 let runTime = 0;
 let runStarted = false;
-let airTime = 0; // seconds airborne; landing after real air resets to spawn
 
 // ---- Map selection (?map=surf_green) ---------------------------------------
 const MAPS = {
@@ -131,7 +131,7 @@ function respawn() {
   state.velocity = [0, 0, 0];
   if (input) { input.yaw = spawn.yaw; input.pitch = 0; }
   prevOrigin = copy(state.origin);
-  runTime = 0; runStarted = false; airTime = 0;
+  runTime = 0; runStarted = false;
   if (hud) hud.peak = 0;
 }
 
@@ -170,7 +170,6 @@ function stepPhysics(dt) {
     const r = entities.apply(state);
     if (r.teleported) {
       if (r.teleported.yaw != null && input) input.yaw = r.teleported.yaw;
-      airTime = 0;
       prevOrigin = copy(state.origin); // avoid a long interpolation streak
     }
   }
@@ -179,29 +178,19 @@ function stepPhysics(dt) {
   if (!runStarted && (cmd.forwardmove || cmd.sidemove || cmd.jump)) runStarted = true;
   if (runStarted) runTime += dt;
 
-  // "hitting the ground" after real air time teleports back to spawn (surf rule)
-  if (!inWater && !onLadder) {
-    if (state.onground) {
-      if (airTime > 0.6) { respawn(); return; }
-      airTime = 0;
-    } else {
-      airTime += dt;
-    }
-  } else {
-    airTime = 0;
-  }
-
-  // fell off the map -> respawn at the spawn point
+  // Falling off is handled by the map's own trigger_teleport volumes (which we
+  // now simulate). killZ is just a last-resort net for maps without them, so
+  // normal jumps/landings never reset you.
   if (state.origin[2] < killZ || !Number.isFinite(state.origin[2])) respawn();
 }
 
 // ---- Camera ----------------------------------------------------------------
-function updateCamera(renderOrigin) {
+function updateCamera(renderOrigin, pitch) {
   const viewZ = state.ducking ? HULL.DUCK.viewZ : HULL.STAND.viewZ;
   const eye = [renderOrigin[0], renderOrigin[1], renderOrigin[2] + viewZ];
   const [ex, ey, ez] = gs2three(eye[0], eye[1], eye[2]);
   camera.position.set(ex, ey, ez);
-  const { forward } = angleVectors(input.pitch, input.yaw);
+  const { forward } = angleVectors(pitch, input.yaw);
   const [fx, fy, fz] = gs2three(forward[0], forward[1], forward[2]);
   camera.lookAt(ex + fx, ey + fy, ez + fz);
 }
@@ -240,9 +229,23 @@ function frame(nowMs) {
     prevOrigin[1] + (state.origin[1] - prevOrigin[1]) * alpha,
     prevOrigin[2] + (state.origin[2] - prevOrigin[2]) * alpha,
   ];
-  updateCamera(ro);
+  // camera punch from firing kicks the view up briefly (+pitch looks down)
+  const pitchEff = input.pitch - (weapons ? weapons.camPunch : 0);
+  updateCamera(ro, pitchEff);
 
   const sp = speed2d(state);
+
+  // firing
+  if (weapons) {
+    weapons.setWeapon(input.weapon);
+    const viewZ = state.ducking ? HULL.DUCK.viewZ : HULL.STAND.viewZ;
+    weapons.update(dt, {
+      attack: !!input.attack && input.active,
+      eyeGS: [ro[0], ro[1], ro[2] + viewZ],
+      yaw: input.yaw,
+      pitch: pitchEff,
+    });
+  }
   hud.update({
     speed: sp,
     onground: state.onground,
@@ -326,6 +329,15 @@ async function boot() {
       rifle: 'assets/models/rifle.glb',
       shotgun: 'assets/models/shotgun.glb',
     }).then((names) => console.log(`[surf] viewmodels loaded: ${names.join(', ') || 'none'}`));
+
+    // Firing: real CS 1.6 weapon sounds + hitscan tracers + recoil.
+    weapons = new Weapons(scene, viewmodel);
+    weapons.setWorld(world);
+    weapons.loadSounds({
+      pistol: 'assets/sounds/pistol.wav',
+      rifle: 'assets/sounds/rifle.wav',
+      shotgun: 'assets/sounds/shotgun.wav',
+    });
 
     window.addEventListener('resize', onResize);
     onResize();

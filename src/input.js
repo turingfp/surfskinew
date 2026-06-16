@@ -51,6 +51,20 @@ export class Input {
 
     window.addEventListener('keydown', (e) => this._key(e, true));
     window.addEventListener('keyup', (e) => this._key(e, false));
+
+    // Mouse buttons: left = attack. Also (re)acquire pointer lock if needed.
+    document.addEventListener('mousedown', (e) => {
+      if (!this.active) return;
+      if (e.button === 0) this.attack = true;
+      if (e.button === 2) this.attack2 = true;
+      if (!this.locked) this._requestLock();
+    });
+    document.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.attack = false;
+      if (e.button === 2) this.attack2 = false;
+    });
+    // Don't pop the context menu on right-click while playing.
+    canvas.addEventListener('contextmenu', (e) => { if (this.active) e.preventDefault(); });
     // Releasing the tab/window pauses to avoid stuck keys.
     window.addEventListener('blur', () => { this.keys = Object.create(null); });
   }
