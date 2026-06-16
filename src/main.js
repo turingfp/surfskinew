@@ -42,7 +42,25 @@ const sun = new THREE.DirectionalLight(0xffffff, 0.7);
 sun.position.set(0.5, 1, 0.3);
 scene.add(sun);
 
-scene.add(buildSky());
+const skyDome = buildSky(); // gradient fallback; replaced by the cubemap if it loads
+scene.add(skyDome);
+
+// Office skybox (converted from the map's TGA sky faces). Three cube order is
+// [+X,-X,+Y,-Y,+Z,-Z]; with our Z-up->Y-up transform that maps to ft,bk,up,dn,rt,lf.
+function loadSkybox() {
+  new THREE.CubeTextureLoader()
+    .setPath('assets/skybox/')
+    .load(
+      ['ft.png', 'bk.png', 'up.png', 'dn.png', 'rt.png', 'lf.png'],
+      (cube) => {
+        cube.colorSpace = THREE.SRGBColorSpace;
+        scene.background = cube;
+        scene.remove(skyDome);
+      },
+      undefined,
+      () => { /* keep gradient on failure */ },
+    );
+}
 
 // ---- Fallback texture (procedural grid; swapped for a Kenney prototype if shipped) ----
 function makeGridTexture() {
@@ -287,6 +305,7 @@ function frame(nowMs) {
 // ---- Boot ------------------------------------------------------------------
 async function boot() {
   try {
+    loadSkybox();
     setStatus(`Loading ${MAP_NAME}.bsp …`);
     const bsp = await loadBSP(MAPS[MAP_NAME]);
 
