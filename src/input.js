@@ -15,6 +15,7 @@ export class Input {
     this.yaw = 0;       // radians, +yaw turns left (toward +Y)
     this.pitch = 0;     // radians, clamped to +/-89 deg
     this.sensitivity = 0.0022; // radians per mouse pixel
+    this.invertY = false;      // mouse-up looks up by default
     this.active = false;       // game is in play (overlay hidden)
     this.locked = false;       // pointer lock is actually held
     this.autohop = false;
@@ -37,7 +38,9 @@ export class Input {
     document.addEventListener('mousemove', (e) => {
       if (!this.active) return;
       this.yaw -= e.movementX * this.sensitivity;
-      this.pitch -= e.movementY * this.sensitivity;
+      // +pitch looks down in our convention, so mouse-up (movementY<0) must
+      // increase-toward-up => pitch += movementY for the non-inverted default.
+      this.pitch += e.movementY * this.sensitivity * (this.invertY ? -1 : 1);
       const lim = (89 * Math.PI) / 180;
       if (this.pitch > lim) this.pitch = lim;
       if (this.pitch < -lim) this.pitch = -lim;
@@ -82,6 +85,12 @@ export class Input {
   _key(e, down) {
     const code = e.code;
     if (down && code === 'Escape') { this.stop(); return; }
+    // Not playing yet? Any key (Enter/Space/etc.) starts — a reliable path that
+    // doesn't depend on the click reaching the canvas or pointer lock working.
+    if (down && !this.active && code !== 'Escape') {
+      this.start();
+      if (code === 'Enter' || code === 'Space') { e.preventDefault(); return; }
+    }
     if (down && code === 'KeyB') this.autohop = !this.autohop;
     if (down && code === 'KeyV') this.noclip = !this.noclip;
     if (down && code === 'KeyR') this._onRespawn.forEach((f) => f());

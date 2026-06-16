@@ -20,8 +20,9 @@
 import {
   CVAR, AIR_WISHSPEED_CAP, GROUND_NORMAL_Z, STOP_EPSILON, OVERBOUNCE,
   MAX_CLIP_PLANES, NUM_BUMPS, HULL, JUMP_HEIGHT, CONTENTS,
+  FORWARD_SPEED, SIDE_SPEED,
 } from './constants.js';
-import { dot, cross, normalize, mad, copy, length } from './vec.js';
+import { dot, cross, normalize, mad, copy, length, angleVectors } from './vec.js';
 
 export function createPlayerState(origin, angles = { yaw: 0, pitch: 0 }) {
   return {
@@ -338,3 +339,75 @@ export function runTick(state, cmd, world, cfg = { autohop: false }, dt = 0.01) 
 }
 
 export const speed2d = (state) => Math.hypot(state.velocity[0], state.velocity[1]);
+
+// ---- Water movement (swim) -------------------------------------------------
+// Simplified GoldSrc water move: 3D wishdir from the full view, water friction,
+// jump = swim up, duck = swim down, gentle buoyancy/sink when idle.
+export function waterMove(state, cmd, world, dt) {
+  const { forward, right } = angleVectors(cmd.pitch, cmd.yaw);
+  const wish = [0, 0, 0];
+  for (let i = 0; i < 3; i++) {
+    wish[i] = forward[i] * (cmd.forwardmove / FORWARD_SPEED) + right[i] * (cmd.sidemove / SIDE_SPEED);
+  }
+  if (cmd.jump) wish[2] += 1;
+  if (cmd.duck) wish[2] -= 1;
+
+  let mag = length(wish);
+  const maxWater = CVAR.sv_maxspeed * 0.8;
+  const wishdir = mag > 1e-6 ? [wish[0] / mag, wish[1] / mag, wish[2] / mag] : [0, 0, 0];
+  const wishspeed = Math.min(mag, 1) * maxWater;
+
+  // water friction
+  const speed = length(state.velocity);
+  if (speed > 0) {
+    const newspeed = Math.max(speed - speed * CVAR.sv_friction * dt, 0);
+    const s = newspeed / speed;
+    state.velocity[0] *= s; state.velocity[1] *= s; state.velocity[2] *= s;
+  }
+  // accelerate toward wish
+  const cur = dot(state.velocity, wishdir);
+  const add = wishspeed - cur;
+  if (add > 0) {
+    let accel = CVAR.sv_airaccelerate > 10 ? 10 : CVAR.sv_airaccelerate; // gentle in water
+    let accelspeed = accel * wishspeed * dt;
+    if (accelspeed > add) accelspeed = add;
+    state.velocity = mad(state.velocity, accelspeed, wishdir);
+  }
+  // buoyancy: drift up slowly when idle so you can surface
+  if (mag < 0.1) state.velocity[2] += 30 * dt;
+
+  state.onground = false;
+  state.groundNormal = null;
+  flyMove(state, dt, world);
+  clampVelocity(state);
+}
+
+// ---- Ladder movement (climb) -----------------------------------------------
+// Move along the full view direction (look up + forward to climb), no gravity.
+// Jump hops off the ladder.
+export function ladderMove(state, cmd, world, dt) {
+  if (cmd.jump) {
+    const { forward } = angleVectors(0, cmd.yaw);
+    state.velocity = [-forward[0] * 270, -forward[1] * 270, 270];
+    state.onground = false;
+    flyMove(state, dt, world);
+    clampVelocity(state);
+    return;
+  }
+  const { forward, right } = angleVectors(cmd.pitch, cmd.yaw);
+  const climb = CVAR.sv_maxspeed * 0.6;
+  const wish = [0, 0, 0];
+  for (let i = 0; i < 3; i++) {
+    wish[i] = forward[i] * (cmd.forwardmove / FORWARD_SPEED) + right[i] * (cmd.sidemove / SIDE_SPEED);
+  }
+  const mag = length(wish);
+  if (mag > 1e-6) {
+    state.velocity = [wish[0] / mag * climb, wish[1] / mag * climb, wish[2] / mag * climb];
+  } else {
+    state.velocity = [0, 0, 0]; // cling to the ladder when no input
+  }
+  state.onground = false;
+  state.groundNormal = null;
+  flyMove(state, dt, world);
+  clampVelocity(state);
+}

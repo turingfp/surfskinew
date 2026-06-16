@@ -75,6 +75,17 @@ await shot('shot_mid.png', () => {
   s.setLook(1.2, -0.15);
 });
 
+// surf_green map
+await page.goto(`http://localhost:${port}/?map=surf_green`, { waitUntil: 'load' });
+await page.waitForFunction(() => window.__surf && window.__surf.ready, { timeout: 30000 });
+await page.evaluate(() => { document.getElementById('overlay').style.display = 'none'; });
+await page.waitForTimeout(600);
+await shot('shot_green.png', () => {
+  const s = window.__surf;
+  s.setState([s.spawn.origin[0], s.spawn.origin[1], s.spawn.origin[2] + 8], [0, 0, 0]);
+  s.setLook(s.spawn.yaw, 0);
+});
+
 await browser.close();
 server.close();
 console.log('done');

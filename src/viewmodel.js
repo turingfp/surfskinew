@@ -10,13 +10,16 @@ export class Viewmodel {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 1.1));
-    const key = new THREE.DirectionalLight(0xffffff, 1.3);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 1.35));
+    const key = new THREE.DirectionalLight(0xffffff, 1.7);
     key.position.set(0.6, 1.0, 0.8);
     this.scene.add(key);
-    const fill = new THREE.DirectionalLight(0x99bbff, 0.5);
+    const fill = new THREE.DirectionalLight(0x9fc0ff, 0.6);
     fill.position.set(-0.8, 0.2, 0.4);
     this.scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xffffff, 0.5);
+    rim.position.set(0.2, 0.4, -1.0);
+    this.scene.add(rim);
 
     this.rig = new THREE.Group();
     // bottom-right placement in view space (camera looks down -Z)
@@ -59,9 +62,10 @@ export class Viewmodel {
     const inner = new THREE.Group();
     inner.add(obj);
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    inner.scale.setScalar(0.34 / maxDim);
-    // Orient like a held weapon: aim into the screen with a slight inward yaw.
-    inner.rotation.set(0, Math.PI + 0.28, 0);
+    inner.scale.setScalar(0.32 / maxDim);
+    // Orient like a held weapon: barrel into the screen, slight inward yaw,
+    // a touch of downward pitch and roll so it reads as held, not floating.
+    inner.rotation.set(-0.05, Math.PI + 0.18, 0.04);
     obj.traverse((m) => { if (m.isMesh) m.frustumCulled = false; });
     return inner;
   }

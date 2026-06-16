@@ -5,7 +5,8 @@ import * as THREE from '../vendor/three.module.js';
 import { loadBSP } from './bsp.js';
 import { CollisionWorld } from './hull.js';
 import { buildLevel, buildSky, gs2three } from './render.js';
-import { createPlayerState, runTick, speed2d } from './physics.js';
+import { createPlayerState, runTick, speed2d, waterMove, ladderMove } from './physics.js';
+import { Entities } from './entities.js';
 import { Viewmodel } from './viewmodel.js';
 import { Input } from './input.js';
 import { HUD } from './hud.js';
@@ -83,13 +84,22 @@ async function tryLoadTexture(url) {
 }
 
 // ---- World / player state --------------------------------------------------
-let world, state, input, hud, viewmodel;
+let world, state, input, hud, viewmodel, entities;
 let bounds, killZ, spawn;
 let prevOrigin;
 let accumulator = 0;
 let lastT = performance.now() / 1000;
 let runTime = 0;
 let runStarted = false;
+let airTime = 0; // seconds airborne; landing after real air resets to spawn
+
+// ---- Map selection (?map=surf_green) ---------------------------------------
+const MAPS = {
+  surf_ski_2: 'assets/maps/surf_ski_2.bsp',
+  surf_green: 'assets/maps/surf_green.bsp',
+};
+const mapParam = new URLSearchParams(location.search).get('map');
+const MAP_NAME = MAPS[mapParam] ? mapParam : 'surf_ski_2';
 
 function parseSpawn(bsp) {
   const list = bsp.entitiesByClass('info_player_start')
@@ -121,7 +131,7 @@ function respawn() {
   state.velocity = [0, 0, 0];
   if (input) { input.yaw = spawn.yaw; input.pitch = 0; }
   prevOrigin = copy(state.origin);
-  runTime = 0; runStarted = false;
+  runTime = 0; runStarted = false; airTime = 0;
   if (hud) hud.peak = 0;
 }
 
@@ -143,11 +153,43 @@ function stepPhysics(dt) {
   }
 
   const cmd = input.command();
-  runTick(state, cmd, world, { autohop: input.autohop }, dt);
+
+  // Choose the movement mode based on the volume the player is in.
+  const inWater = entities && entities.inWater(state.origin);
+  const onLadder = !inWater && entities && entities.onLadder(state.origin);
+  if (inWater) {
+    waterMove(state, cmd, world, dt);
+  } else if (onLadder) {
+    ladderMove(state, cmd, world, dt);
+  } else {
+    runTick(state, cmd, world, { autohop: input.autohop }, dt);
+  }
+
+  // boosters (trigger_push) + teleports (trigger_teleport)
+  if (entities) {
+    const r = entities.apply(state);
+    if (r.teleported) {
+      if (r.teleported.yaw != null && input) input.yaw = r.teleported.yaw;
+      airTime = 0;
+      prevOrigin = copy(state.origin); // avoid a long interpolation streak
+    }
+  }
 
   // start the run timer on first real movement input
   if (!runStarted && (cmd.forwardmove || cmd.sidemove || cmd.jump)) runStarted = true;
   if (runStarted) runTime += dt;
+
+  // "hitting the ground" after real air time teleports back to spawn (surf rule)
+  if (!inWater && !onLadder) {
+    if (state.onground) {
+      if (airTime > 0.6) { respawn(); return; }
+      airTime = 0;
+    } else {
+      airTime += dt;
+    }
+  } else {
+    airTime = 0;
+  }
 
   // fell off the map -> respawn at the spawn point
   if (state.origin[2] < killZ || !Number.isFinite(state.origin[2])) respawn();
@@ -228,8 +270,8 @@ function frame(nowMs) {
 // ---- Boot ------------------------------------------------------------------
 async function boot() {
   try {
-    setStatus('Loading surf_ski_2.bsp …');
-    const bsp = await loadBSP('assets/surf_ski_2.bsp');
+    setStatus(`Loading ${MAP_NAME}.bsp …`);
+    const bsp = await loadBSP(MAPS[MAP_NAME]);
 
     setStatus('Loading textures …');
     // Shipped CC0 Kenney "Prototype Textures" set, used for the ~55 surfaces
@@ -256,6 +298,8 @@ async function boot() {
 
     world = new CollisionWorld(bsp);
     spawn = parseSpawn(bsp);
+    entities = new Entities(bsp);
+    console.log(`[surf] entities: pushes=${entities.pushes.length} teleports=${entities.teleports.length} ladders=${entities.ladders.length} waters=${entities.waters.length}`);
 
     input = new Input();
     input.attach(canvas);

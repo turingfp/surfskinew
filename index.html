@@ -51,7 +51,13 @@
   .keys kbd { background:#1c2733; border:1px solid #2f3f4f; border-bottom-width:2px; border-radius:5px;
     padding:2px 8px; color:#dff; font-family:inherit; }
   .keys .d { color:#aebfce; align-self:center; }
-  .play { margin-top:20px; text-align:center; color:var(--accent); font-size:14px; letter-spacing:2px; }
+  .maps { margin-top:18px; display:flex; align-items:center; gap:10px; }
+  .maps .ml { color:#7f93a4; font-size:12px; letter-spacing:2px; }
+  .mapbtn { text-decoration:none; color:#cfe; background:#16212c; border:1px solid #2f4150;
+    border-radius:6px; padding:5px 12px; font-size:13px; }
+  .mapbtn:hover { border-color:var(--accent); }
+  .mapbtn.active { background:var(--accent); color:#08110c; border-color:var(--accent); font-weight:700; }
+  .play { margin-top:18px; text-align:center; color:var(--accent); font-size:14px; letter-spacing:2px; }
   #status { margin-top:10px; color:#ffb86b; font-size:12px; min-height:1em; text-align:center; }
   .tip { margin-top:14px; font-size:12px; color:#7f93a4; line-height:1.5; }
 </style>
@@ -89,7 +95,12 @@
         <span><kbd>B</kbd></span><span class="d">Toggle auto-bhop</span>
         <span><kbd>V</kbd></span><span class="d">Toggle noclip (fly to explore)</span>
       </div>
-      <p class="play">▶ CLICK TO PLAY</p>
+      <div class="maps">
+        <span class="ml">MAP</span>
+        <a class="mapbtn" href="?map=surf_ski_2">surf_ski_2</a>
+        <a class="mapbtn" href="?map=surf_green">surf_green</a>
+      </div>
+      <p class="play">▶ CLICK or PRESS ENTER to play</p>
       <div id="status"></div>
       <p class="tip">Surf: ride the steep ramps. Hold one strafe key (A or D) and rotate the
       mouse the same way in sync — keep your aim just off your velocity and you accelerate.</p>
@@ -98,6 +109,17 @@
 
   <!-- Map the bare "three" specifier (used by the vendored GLTFLoader) to our
        local Three.js build, so the weapon viewmodel loader needs no CDN. -->
+  <script>
+    // Highlight the active map button from the ?map= query.
+    (function () {
+      var m = new URLSearchParams(location.search).get('map') || 'surf_ski_2';
+      document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('.mapbtn').forEach(function (a) {
+          if (a.getAttribute('href') === '?map=' + m) a.classList.add('active');
+        });
+      });
+    })();
+  </script>
   <script type="importmap">
   { "imports": { "three": "./vendor/three.module.js" } }
   </script>
