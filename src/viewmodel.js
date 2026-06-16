@@ -60,10 +60,13 @@ export class Viewmodel {
       const n = g.positions.length / 3;
       const pos = new Float32Array(n * 3);
       const nrm = new Float32Array(n * 3);
-      // GoldSrc (X fwd, Y left, Z up) -> three (x, z, -y)
+      // GoldSrc view space (X fwd, Y left, Z up) -> view-model camera space
+      // (looks -Z, +Y up, +X right):  three = (-Y, Z, -X)
       for (let i = 0; i < n; i++) {
-        pos[i * 3] = g.positions[i * 3]; pos[i * 3 + 1] = g.positions[i * 3 + 2]; pos[i * 3 + 2] = -g.positions[i * 3 + 1];
-        nrm[i * 3] = g.normals[i * 3]; nrm[i * 3 + 1] = g.normals[i * 3 + 2]; nrm[i * 3 + 2] = -g.normals[i * 3 + 1];
+        const mx = g.positions[i * 3], my = g.positions[i * 3 + 1], mz = g.positions[i * 3 + 2];
+        pos[i * 3] = -my; pos[i * 3 + 1] = mz; pos[i * 3 + 2] = -mx;
+        const ax = g.normals[i * 3], ay = g.normals[i * 3 + 1], az = g.normals[i * 3 + 2];
+        nrm[i * 3] = -ay; nrm[i * 3 + 1] = az; nrm[i * 3 + 2] = -ax;
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -93,7 +96,8 @@ export class Viewmodel {
     wrap.add(inner);
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
     wrap.scale.setScalar(0.5 / maxDim);
-    wrap.rotation.set(0, -Math.PI / 2, 0); // forward (+X) -> into screen (-Z)
+    // slight inward yaw + downward pitch so it reads as held, not floating
+    wrap.rotation.set(-0.04, 0.16, 0);
     return wrap;
   }
 
