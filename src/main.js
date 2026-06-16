@@ -260,10 +260,16 @@ async function boot() {
     input = new Input();
     input.attach(canvas);
     input.onRespawn(respawn);
-    input.onLockChange((locked) => {
-      const overlay = document.getElementById('overlay');
-      if (overlay) overlay.style.display = locked ? 'none' : 'flex';
+    const overlay = document.getElementById('overlay');
+    input.onActiveChange((active) => {
+      if (overlay) overlay.style.display = active ? 'none' : 'flex';
+      canvas.style.cursor = active ? 'none' : 'crosshair';
     });
+    // The overlay sits above the canvas, so it must be the click target that
+    // starts play (otherwise clicks never reach the canvas).
+    if (overlay) overlay.addEventListener('click', () => input.start());
+    // Clicking the game surface while playing re-grabs pointer lock if dropped.
+    canvas.addEventListener('click', () => { if (input.active && !input.locked) input.start(); });
 
     hud = new HUD(document);
     respawn();
