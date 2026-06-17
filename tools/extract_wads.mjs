@@ -78,9 +78,33 @@ for (const f of readdirSync(join(ROOT, 'assets', 'maps'))) {
 // strip animated/random/special prefixes (+0 +a -0 -1 { ! ~) -> base name
 const norm = (s) => s.replace(/^[+\-]\w/, '').replace(/^[{!~]/, '');
 
-// index of WAD entries by normalised base name for fuzzy matching
-const wadIndex = []; // {base, name, w, e}
-for (const w of wads) for (const [name, e] of w) wadIndex.push({ base: norm(name), name, w, e });
+// average colour stats for a miptex (sampled) -> saturation + luminance + size
+function stats(dv, base) {
+  const w = dv.getUint32(base + 16, true), h = dv.getUint32(base + 20, true);
+  const o0 = dv.getUint32(base + 24, true), o3 = dv.getUint32(base + 36, true);
+  if (!w || !h || !o0) return { w: 0, sat: 1, lum: 0 };
+  const pal = base + o3 + (w >> 3) * (h >> 3) + 2;
+  const idxBase = base + o0; const n = w * h; const step = Math.max(1, (n / 256) | 0);
+  let r = 0, g = 0, b = 0, cnt = 0;
+  for (let p = 0; p < n; p += step) {
+    const ci = dv.getUint8(idxBase + p); const po = pal + ci * 3;
+    r += dv.getUint8(po); g += dv.getUint8(po + 1); b += dv.getUint8(po + 2); cnt++;
+  }
+  r /= cnt; g /= cnt; b /= cnt;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  return { w, sat: mx ? (mx - mn) / mx : 0, lum: 0.3 * r + 0.59 * g + 0.11 * b };
+}
+
+// index of WAD entries by normalised base name for fuzzy matching (+ colour stats)
+const wadIndex = []; // {base, name, w, e, sat, lum}
+for (const w of wads) for (const [name, e] of w) {
+  const s = stats(e.dv, e.filepos);
+  wadIndex.push({ base: norm(name), name, w, e, sat: s.sat, lum: s.lum, size: s.w });
+}
+const clean = (it) => it.sat < 0.32 && it.lum > 55 && it.lum < 225 && it.size >= 64 && !/^[+~]/.test(it.name);
+// a neutral, light-ish stand-in used when nothing else fits (avoids busy/garish textures)
+const DEFAULT = wadIndex.filter((it) => clean(it) && /wall|crete|generic|out_|tile|cliff|rock/.test(it.name))
+  .sort((a, b) => Math.abs(150 - a.lum) - Math.abs(150 - b.lum))[0] || wadIndex[0];
 
 // category -> WAD-name search terms, used to pick a "good enough" real texture
 // when there's no exact/fuzzy match (so we never show a flat placeholder).
@@ -97,14 +121,18 @@ const CATEGORY = [
 ];
 
 function searchWad(terms, maskedPref) {
-  // prefer masked ({) textures when the needed texture is masked
   for (const wantMasked of (maskedPref ? [true, false] : [false, true])) {
+    let best = null, bestSat = 2;
     for (const t of terms) {
       for (const it of wadIndex) {
-        const m = it.name.startsWith('{');
-        if (m === wantMasked && it.name.includes(t)) return it.e;
+        if (it.name.startsWith('{') !== wantMasked) continue;
+        if (!it.name.includes(t)) continue;
+        // prefer clean (low-saturation, mid-bright) textures
+        if (clean(it) && it.sat < bestSat) { best = it; bestSat = it.sat; }
+        else if (!best) best = it;
       }
     }
+    if (best) return best.e;
   }
   return null;
 }
@@ -121,10 +149,10 @@ function findEntry(nm) {
     if (k > bestLen) { bestLen = k; best = it.e; }
   }
   if (best) return best;
-  // 5. category-based "good enough" texture (never a placeholder)
+  // 5. category-based clean "good enough" texture (never a placeholder)
   const masked = nm.startsWith('{');
   for (const [re, terms] of CATEGORY) if (re.test(nm)) { const e = searchWad(terms, masked); if (e) return e; }
-  return searchWad(['wall', 'crete', 'generic'], masked) || wadIndex[0]?.e || null;
+  return searchWad(['wall', 'crete', 'generic', 'tile'], masked) || (DEFAULT && DEFAULT.e) || wadIndex[0]?.e || null;
 }
 
 mkdirSync(OUT, { recursive: true });
