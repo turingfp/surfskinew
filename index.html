@@ -116,6 +116,21 @@
     background:rgba(40,110,150,0.32); box-shadow:inset 0 0 220px rgba(0,30,60,0.6); }
   .mpnote { color:#8aa0b2; font-size:11px; line-height:1.4; margin:6px 0 0; }
 
+  /* Damage direction indicator */
+  #dmg-dir { position:fixed; left:50%; top:50%; width:300px; height:300px; margin:-150px 0 0 -150px;
+    z-index:6; pointer-events:none; opacity:0; transition:opacity 0.12s; }
+  #dmg-dir.show { opacity:1; }
+  #dmg-arc { position:absolute; inset:0; border-radius:50%;
+    border:16px solid transparent; border-top-color:rgba(220,40,40,0.82);
+    filter:drop-shadow(0 0 8px rgba(255,60,60,0.7)); }
+  /* Death flash */
+  #death-flash { position:fixed; inset:0; z-index:11; pointer-events:none;
+    display:flex; align-items:center; justify-content:center;
+    font-size:46px; font-weight:800; letter-spacing:8px; color:#fff;
+    text-shadow:0 0 40px rgba(255,0,0,1), 0 2px 8px rgba(0,0,0,0.9);
+    background:rgba(160,0,0,0); opacity:0; transition:opacity 0.15s; }
+  #death-flash.show { opacity:1; background:rgba(160,0,0,0.42); }
+
   /* Touch controls */
   #touch { position:fixed; inset:0; z-index:7; display:none; pointer-events:none; }
   #t-stickhint { position:fixed; left:80px; bottom:90px; width:120px; height:120px; opacity:0.5; }
@@ -166,6 +181,8 @@
   <div id="toast"></div>
   <div id="usePrompt"></div>
   <div id="underwater"></div>
+  <div id="dmg-dir"><div id="dmg-arc"></div></div>
+  <div id="death-flash">YOU DIED</div>
 
   <div id="scoreboard">
     <div class="sb-title">RACE — <span id="sb-map">surf_ski_2</span></div>

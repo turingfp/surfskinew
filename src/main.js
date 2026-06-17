@@ -175,6 +175,36 @@ let playerName = localStorage.getItem('surf_name') || `Surfer${Math.floor(1000 +
 let health = 100, kills = 0, deaths = 0;
 let finishTime = null; // set when a finish zone is crossed (if configured)
 
+// ---- Damage direction indicator + death flash --------------------------------
+const dmgDirEl = document.getElementById('dmg-dir');
+const dmgArcEl = document.getElementById('dmg-arc');
+const deathFlashEl = document.getElementById('death-flash');
+let _dmgDirTimer = null;
+let _deathFlashTimer = null;
+
+function showDamageDir(attackerGsPos) {
+  if (!dmgDirEl || !dmgArcEl || !state) return;
+  const dx = attackerGsPos[0] - state.origin[0];
+  const dy = attackerGsPos[1] - state.origin[1];
+  if (Math.hypot(dx, dy) < 1) return;
+  const yaw = input ? input.yaw : 0;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const fwd = dx * cy + dy * sy;
+  const rgt = dx * sy - dy * cy;
+  const angleDeg = Math.atan2(rgt, fwd) * 180 / Math.PI;
+  dmgArcEl.style.transform = `rotate(${angleDeg}deg)`;
+  dmgDirEl.classList.add('show');
+  clearTimeout(_dmgDirTimer);
+  _dmgDirTimer = setTimeout(() => dmgDirEl.classList.remove('show'), 650);
+}
+
+function showDeathFlash() {
+  if (!deathFlashEl) return;
+  deathFlashEl.classList.add('show');
+  clearTimeout(_deathFlashTimer);
+  _deathFlashTimer = setTimeout(() => deathFlashEl.classList.remove('show'), 1100);
+}
+
 // Optional per-map start/finish zones for timed runs. Start auto-derives from
 // the spawn; finish is map-specific (left null = freestyle race by top speed).
 const MAP_ZONES = {
@@ -273,14 +303,16 @@ function playerHitTest(eyeGS, dirGS) {
   return best;
 }
 
-function applyDamage(dmg, by) {
+function applyDamage(dmg, by, attackerPos) {
   if (input && input.noclip) return;
+  if (attackerPos) showDamageDir(attackerPos);
   health -= dmg;
   if (health <= 0) {
     deaths++;
     addKill(`<b>${escHtml(by)}</b> ▸ ${escHtml(playerName)}`);
     if (net && net.connected) net.broadcastFrag({ by, victim: playerName });
     if (hud) hud.toast(`Fragged by ${escHtml(by)}`, '#ff6b6b');
+    showDeathFlash();
     respawn(); // resets health to 100
   }
 }
@@ -453,8 +485,11 @@ function frame(nowMs) {
       pitch: pitchEff,
     });
   }
-  // slow health regen between fights
-  if (health < 100) health = Math.min(100, health + dt * 7);
+  // health regen: disabled in active deathmatch, slow otherwise
+  if (health < 100) {
+    const inDeathmatch = net && net.connected && net.peers.size > 0;
+    health = Math.min(100, health + dt * (inDeathmatch ? 0 : 7));
+  }
 
   // track all-time top speed (per map)
   if (hud.peak > pbSpeed) { pbSpeed = hud.peak; try { localStorage.setItem(PB_SPEED_KEY, String(Math.round(pbSpeed))); } catch { /* ignore */ } }
@@ -742,7 +777,11 @@ async function boot() {
     net.on('state', (id, data) => remotePlayers.update(id, data));
     net.on('leave', (id) => remotePlayers.remove(id));
     net.on('shot', (id, data) => { if (weapons) weapons.remoteShot(data); });
-    net.on('hit', (id, data) => applyDamage(data.dmg || 0, data.by || 'someone'));
+    net.on('hit', (id, data) => {
+      let attackerPos = null;
+      if (remotePlayers) remotePlayers.forEach((pid, o) => { if (pid === id) attackerPos = o; });
+      applyDamage(data.dmg || 0, data.by || 'someone', attackerPos);
+    });
     net.on('frag', (id, data) => {
       addKill(`<b>${escHtml(data.by)}</b> ▸ ${escHtml(data.victim)}`);
       if (data.by === playerName) kills++;
