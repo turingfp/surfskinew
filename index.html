@@ -2,8 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>surf_ski_2 — CS surf</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>SURF — CS 1.6 surf in your browser</title>
+<meta name="description" content="A browser-native Counter-Strike 1.6 surf game: authentic GoldSrc movement, real .bsp maps, P2P multiplayer races and deathmatch — no install." />
+<meta name="theme-color" content="#0b0f14" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="SURF — CS 1.6 surf in your browser" />
+<meta property="og:description" content="Authentic GoldSrc surf physics, real .bsp maps, P2P multiplayer. Click to play — no install." />
+<meta property="og:image" content="docs/shot_spawn.png" />
+<meta name="twitter:card" content="summary_large_image" />
 <style>
   :root { --accent:#7fd1ae; --cs:#ffcf6b; --panel:rgba(10,16,22,0.78); --xgap:6px; --xlen:7px; --xcol:rgba(170,255,220,0.9); }
   * { box-sizing: border-box; }
@@ -80,6 +90,17 @@
   #killfeed .kf { background:rgba(10,16,22,0.6); border-radius:5px; padding:3px 9px; font-size:13px; color:#dfe9f2; }
   #killfeed .kf b { color:var(--cs); }
 
+  /* Touch controls */
+  #touch { position:fixed; inset:0; z-index:7; display:none; pointer-events:none; }
+  #t-stickhint { position:fixed; left:80px; bottom:90px; width:120px; height:120px; opacity:0.5; }
+  #t-stickhint .ring { position:absolute; inset:0; border:2px solid rgba(255,255,255,0.4); border-radius:50%; }
+  #t-stickhint .dot { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px; border-radius:50%; background:rgba(255,255,255,0.25); }
+  #t-buttons { position:fixed; right:18px; bottom:24px; display:flex; gap:12px; align-items:flex-end; pointer-events:auto; }
+  #t-buttons button { pointer-events:auto; font-family:inherit; font-weight:700; color:#dff; background:rgba(20,33,44,0.7);
+    border:1px solid #3a5364; border-radius:50%; width:62px; height:62px; font-size:12px; }
+  #t-buttons #t-fire { width:84px; height:84px; background:rgba(120,30,30,0.6); border-color:#a05050; font-size:14px; }
+  #t-buttons #t-jump { background:rgba(30,70,50,0.6); border-color:#4f8f6f; }
+
   /* Overlay menu */
   #overlay { position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
     background:rgba(6,10,14,0.84); backdrop-filter:blur(4px); overflow:auto; }
@@ -126,6 +147,18 @@
   </div>
   <div id="killfeed"></div>
 
+  <!-- On-screen touch controls (shown only on touch devices) -->
+  <div id="touch">
+    <div id="t-stickhint"><div class="ring"></div><div class="dot"></div></div>
+    <div id="t-buttons">
+      <button id="t-weapon" data-btn="1" type="button">WPN</button>
+      <button id="t-reload" data-btn="1" type="button">R</button>
+      <button id="t-duck" data-btn="1" type="button">DUCK</button>
+      <button id="t-jump" data-btn="1" type="button">JUMP</button>
+      <button id="t-fire" data-btn="1" type="button">FIRE</button>
+    </div>
+  </div>
+
   <div id="hud-tl" class="hud"><b id="mapname">surf_ski_2</b> · <span id="runstate">ready</span></div>
 
   <div id="hud-tr" class="hud">
@@ -155,8 +188,8 @@
 
   <div id="overlay">
     <div class="card">
-      <h1>surf_<span>ski_2</span></h1>
-      <p class="sub">GoldSrc / CS 1.6 surf — authentic pm_shared movement · real BSP collision · P2P multiplayer.</p>
+      <h1>SURF<span>::</span><span id="title-map">ski_2</span></h1>
+      <p class="sub">Counter-Strike 1.6 surf in your browser — authentic GoldSrc pm_shared movement, real <code>.bsp</code> maps, bullet physics &amp; <b>P2P multiplayer races + deathmatch</b>. No install.</p>
       <div class="grid2">
         <div class="sec">
           <h2>Controls</h2>
@@ -203,6 +236,7 @@
         document.querySelectorAll('.mapbtn').forEach(function (a) {
           if (a.getAttribute('href') === '?map=' + m) a.classList.add('active');
         });
+        var tm = document.getElementById('title-map'); if (tm) tm.textContent = m.replace('surf_', '');
       });
     })();
   </script>

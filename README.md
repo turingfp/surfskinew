@@ -34,17 +34,27 @@ npm start          # serves on http://localhost:8000
 | **Shift** | Duck |
 | **LMB** | Fire |
 | **R** | Reload |
-| **1 / 2 / 3** | USP / M4A1 / M3 |
+| **1 … 6** | USP · Deagle · M4A1 · AK47 · AWP · M3 |
 | **C / X** | Save / load checkpoint (practice) |
 | **U** | Restart run |
-| **B** | Toggle auto-bunnyhop |
-| **V** | Toggle noclip (fly to explore the map) |
+| **Tab** | Scoreboard (race + K/D) |
+| **B / V** | Auto-bunnyhop / noclip |
+
+**Maps:** `surf_ski_2`, `surf_green` (real GoldSrc `.bsp`), and `surf_arena`
+(procedurally generated with analytic brush collision). Pick in the menu or via
+`?map=`.
 
 **Multiplayer is on by default** — you auto-join the `public` room (serverless
-WebRTC). Change the room name in the menu to play with friends privately; the
-HUD shows the live player count. Settings (sensitivity, FOV, volume, quality)
-are in the menu and persist locally, as do your per-map best run time and top
-speed.
+WebRTC via Trystero). Everyone in a room shares the session: you see each other
+surf, a live **race scoreboard** (Tab) ranks by top speed, and **PvP counts**
+(hitscan vs. other players → damage, kills, kill feed, K/D). Change the room
+name to play privately.
+
+**Mobile:** on touch devices an on-screen joystick (left), drag-to-look (right),
+and Fire/Jump/Duck/Reload/Weapon buttons appear automatically.
+
+Settings (sensitivity, FOV, volume, render quality) and per-map personal bests
+persist in `localStorage`.
 
 **How to surf:** ride the steep ramps. Hold one strafe key (A *or* D) and rotate
 the mouse the *same* direction in sync, keeping your aim just off your velocity

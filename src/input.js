@@ -22,6 +22,12 @@ export class Input {
     this.noclip = false;
     this.scoreboard = false;
     this.weapon = 'usp';
+    // touch state
+    this.isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+    this.touchSens = 0.005;
+    this._tMove = { id: null, fx: 0, fy: 0 };
+    this._tLook = { id: null, x: 0, y: 0 };
+    this.tJump = false; this.tDuck = false;
     this._onActive = [];
     this._onRespawn = [];
     this._onReload = [];
@@ -70,6 +76,71 @@ export class Input {
     canvas.addEventListener('contextmenu', (e) => { if (this.active) e.preventDefault(); });
     // Releasing the tab/window pauses to avoid stuck keys.
     window.addEventListener('blur', () => { this.keys = Object.create(null); });
+
+    if (this.isTouch) this._setupTouch(canvas);
+  }
+
+  // Virtual joystick (left half = move) + drag-to-look (right half) + buttons.
+  _setupTouch(canvas) {
+    const layer = document.getElementById('touch');
+    if (layer) layer.style.display = 'block';
+    const half = () => window.innerWidth / 2;
+
+    const onStart = (e) => {
+      if (!this.active) this.start();
+      for (const t of e.changedTouches) {
+        if (t.target && t.target.dataset && t.target.dataset.btn) continue; // buttons handle themselves
+        if (t.clientX < half() && this._tMove.id == null) {
+          this._tMove.id = t.identifier; this._tMove.ox = t.clientX; this._tMove.oy = t.clientY; this._tMove.fx = 0; this._tMove.fy = 0;
+        } else if (this._tLook.id == null) {
+          this._tLook.id = t.identifier; this._tLook.x = t.clientX; this._tLook.y = t.clientY;
+        }
+      }
+      e.preventDefault();
+    };
+    const onMove = (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === this._tMove.id) {
+          const dx = t.clientX - this._tMove.ox, dy = t.clientY - this._tMove.oy;
+          this._tMove.fx = Math.max(-1, Math.min(1, dx / 55));
+          this._tMove.fy = Math.max(-1, Math.min(1, dy / 55));
+        } else if (t.identifier === this._tLook.id) {
+          this.yaw -= (t.clientX - this._tLook.x) * this.touchSens;
+          this.pitch += (t.clientY - this._tLook.y) * this.touchSens * (this.invertY ? -1 : 1);
+          const lim = (89 * Math.PI) / 180;
+          this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
+          this._tLook.x = t.clientX; this._tLook.y = t.clientY;
+        }
+      }
+      e.preventDefault();
+    };
+    const onEnd = (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === this._tMove.id) { this._tMove.id = null; this._tMove.fx = 0; this._tMove.fy = 0; }
+        if (t.identifier === this._tLook.id) this._tLook.id = null;
+      }
+    };
+    canvas.addEventListener('touchstart', onStart, { passive: false });
+    canvas.addEventListener('touchmove', onMove, { passive: false });
+    canvas.addEventListener('touchend', onEnd);
+    canvas.addEventListener('touchcancel', onEnd);
+
+    // on-screen buttons
+    const hold = (id, on, off) => {
+      const el = document.getElementById(id); if (!el) return;
+      const d = (e) => { e.preventDefault(); e.stopPropagation(); on(); };
+      const u = (e) => { e.preventDefault(); e.stopPropagation(); if (off) off(); };
+      el.addEventListener('touchstart', d, { passive: false });
+      el.addEventListener('touchend', u); el.addEventListener('touchcancel', u);
+    };
+    hold('t-fire', () => { this.attack = true; }, () => { this.attack = false; });
+    hold('t-jump', () => { this.tJump = true; }, () => { this.tJump = false; });
+    hold('t-duck', () => { this.tDuck = true; }, () => { this.tDuck = false; });
+    hold('t-reload', () => { this._onReload.forEach((f) => f()); });
+    hold('t-weapon', () => {
+      const order = ['usp', 'deagle', 'm4a1', 'ak47', 'awp', 'm3'];
+      this.weapon = order[(order.indexOf(this.weapon) + 1) % order.length];
+    });
   }
 
   // Begin play (or re-grab pointer lock): hide overlay and try to lock.
@@ -133,13 +204,15 @@ export class Input {
     if (k['KeyS'] || k['ArrowDown']) fmove -= FORWARD_SPEED;
     if (k['KeyD'] || k['ArrowRight']) smove += SIDE_SPEED;
     if (k['KeyA'] || k['ArrowLeft']) smove -= SIDE_SPEED;
+    // touch joystick (up = forward)
+    if (this._tMove.id != null) { fmove += -this._tMove.fy * FORWARD_SPEED; smove += this._tMove.fx * SIDE_SPEED; }
     return {
-      forwardmove: fmove,
-      sidemove: smove,
+      forwardmove: Math.max(-FORWARD_SPEED, Math.min(FORWARD_SPEED, fmove)),
+      sidemove: Math.max(-SIDE_SPEED, Math.min(SIDE_SPEED, smove)),
       yaw: this.yaw,
       pitch: this.pitch,
-      jump: !!k['Space'],
-      duck: !!(k['ShiftLeft'] || k['ControlLeft'] || k['KeyC']),
+      jump: !!k['Space'] || this.tJump,
+      duck: !!(k['ShiftLeft'] || k['ControlLeft']) || this.tDuck,
     };
   }
 }
