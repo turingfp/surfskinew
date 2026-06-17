@@ -6,6 +6,13 @@ import * as THREE from '../vendor/three.module.js';
 import { GLTFLoader } from '../vendor/jsm/loaders/GLTFLoader.js';
 import { loadMDL } from './mdl.js';
 
+// Per-weapon nudge [x, y, z] in rig space, on top of the shared base placement.
+// Pistols (rhand bodypart skipped) end up sitting high after bbox-centering, so
+// we lower them so the gun reads at hand height rather than mid-screen.
+const VM_OFFSET = {
+  usp: [0, -0.075, 0.02], deagle: [0, -0.055, 0.01], glock: [0, -0.07, 0.02],
+};
+
 export class Viewmodel {
   constructor() {
     this.scene = new THREE.Scene();
@@ -56,7 +63,7 @@ export class Viewmodel {
     const skipBodyparts = (typeof def === 'object' && def.skip) ? def.skip : [];
     try {
       const data = await loadMDL(url, { skipBodyparts });
-      const weapon = this._makeMDLWeapon(data);
+      const weapon = this._makeMDLWeapon(data, name);
       weapon.visible = false;
       this.rig.add(weapon);
       this.weapons[name] = weapon;
@@ -73,7 +80,7 @@ export class Viewmodel {
     return Object.keys(this.weapons);
   }
 
-  _makeMDLWeapon(data) {
+  _makeMDLWeapon(data, name) {
     const inner = new THREE.Group();
     for (const g of data.groups) {
       // The CS v_ models' long axis (barrel/arm) is model Y, up is model Z.
@@ -117,6 +124,8 @@ export class Viewmodel {
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
     wrap.scale.setScalar(0.5 / maxDim);
     wrap.rotation.set(this._vmEuler[0], this._vmEuler[1], this._vmEuler[2]);
+    const off = VM_OFFSET[name];
+    if (off) wrap.position.set(off[0], off[1], off[2]);
     return wrap;
   }
 

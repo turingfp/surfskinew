@@ -77,9 +77,12 @@ function materialFor(tex, fallbacks, lightMap, wadTex) {
     mat = new THREE.MeshBasicMaterial({ color: nameColor(name), side: THREE.DoubleSide, ...common });
   }
   // Water surfaces ('!' textures): translucent, single-sided, no depth write so
-  // they don't z-fight / flash when the camera is inside the water.
+  // they don't z-fight / flash when the camera is inside the water. A small
+  // negative polygon offset biases the surface consistently toward the camera so
+  // it doesn't flicker against the coplanar pool floor as you move.
   if (name.startsWith('!') || name.includes('water')) {
     mat.transparent = true; mat.opacity = 0.7; mat.depthWrite = false; mat.side = THREE.FrontSide;
+    mat.polygonOffset = true; mat.polygonOffsetFactor = -1; mat.polygonOffsetUnits = -1;
   }
   return mat;
 }
@@ -287,6 +290,9 @@ export function buildWorldModel(data, { center = true } = {}) {
     const box = new THREE.Box3().setFromObject(group);
     const c = box.getCenter(new THREE.Vector3());
     group.children.forEach((m) => m.position.sub(c));
+    // distance from the (now centred) origin down to the model's lowest point,
+    // so callers can rest it on a floor (negative; in unscaled model units).
+    group.userData.modelMinY = box.min.y - c.y;
   }
   return group;
 }

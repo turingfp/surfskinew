@@ -522,12 +522,23 @@ async function buildPickups() {
     try { pickupModelCache.set(id, buildWorldModel(await loadMDL(`assets/models/cs/w/w_${id}.mdl`))); }
     catch { pickupModelCache.set(id, null); }
   }));
+  const SCALE = 1.4;
   for (const p of entities.pickups) {
     const tmpl = pickupModelCache.get(p.weaponId);
     const mesh = tmpl ? tmpl.clone(true)
       : new THREE.Mesh(new THREE.BoxGeometry(20, 8, 28), new THREE.MeshLambertMaterial({ color: 0xffcf6b }));
-    mesh.scale.setScalar(1.4);
-    const o = [p.origin[0], p.origin[1], p.origin[2] + 6];
+    mesh.scale.setScalar(SCALE);
+    // Drop the pickup to the floor under its armoury spawn so it rests on the
+    // ground (the model is centred on its bbox, so offset by its scaled bottom).
+    const ox = p.origin[0], oy = p.origin[1], oz = p.origin[2];
+    let floorZ = oz;
+    if (world && world.traceBullet) {
+      const tr = world.traceBullet([ox, oy, oz + 16], [ox, oy, oz - 1024]);
+      if (tr.fraction < 1 && !tr.startsolid) floorZ = tr.endpos[2];
+    }
+    const minY = (mesh.userData && typeof mesh.userData.modelMinY === 'number') ? mesh.userData.modelMinY : -6;
+    const centerZ = floorZ + 1 - minY * SCALE; // bottom rests ~1u above the floor
+    const o = [ox, oy, centerZ];
     const [x, y, z] = gs2three(o[0], o[1], o[2]);
     mesh.position.set(x, y, z);
     scene.add(mesh);
@@ -547,7 +558,8 @@ function updatePickups(dt, eyeGS, dirGS) {
   for (const p of pickups) {
     if (p.taken) { if (now >= p.respawnAt) { p.taken = false; p.mesh.visible = true; } continue; }
     p.mesh.rotation.y += dt * 1.6;
-    p.mesh.position.y = p.baseY + Math.sin(now * 2 + p.origin[0] * 0.01) * 3;
+    // gentle upward-only hover so the weapon never sinks into the floor
+    p.mesh.position.y = p.baseY + (Math.sin(now * 2 + p.origin[0] * 0.01) * 0.5 + 0.5) * 1.5;
     // is the player looking at this pickup, and close enough?
     const dx = p.origin[0] - eyeGS[0], dy = p.origin[1] - eyeGS[1], dz = p.origin[2] - eyeGS[2];
     const d = Math.hypot(dx, dy, dz);
@@ -801,6 +813,7 @@ async function boot() {
       vmReady: () => !!(viewmodel && Object.keys(viewmodel.weapons).length),
       selectWeapon: (n) => { if (input) input.weapon = n; if (viewmodel) viewmodel.select(n); },
       addBot: (o, y) => remotePlayers && remotePlayers.update('TESTBOT', { o, y: y || 0, nm: 'BOT' }),
+      pickups: () => pickups.map((p) => ({ id: p.weaponId, o: [...p.origin] })),
       tick: (cmd, dt = FIXED_DT) => { runTick(state, cmd, world, { autohop: false }, dt); return speed2d(state); },
       // Tick against a caller-supplied (e.g. open-air) world — isolates the
       // movement maths from level collision for testing.

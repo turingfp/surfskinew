@@ -344,6 +344,28 @@ export const speed2d = (state) => Math.hypot(state.velocity[0], state.velocity[1
 // Simplified GoldSrc water move: 3D wishdir from the full view, water friction,
 // jump = swim up, duck = swim down, gentle buoyancy/sink when idle.
 export function waterMove(state, cmd, world, dt) {
+  // Jump in water: a fresh jump press either launches you straight up off a
+  // solid bottom (shallow pools) or boosts you up-and-over a ledge with clear
+  // headroom (GoldSrc PM_CheckWaterJump). Without this you bob helplessly at the
+  // water's edge and get stuck (notably surf_green's jail pool).
+  if (cmd.jump && !state.jumpHeld) {
+    const hull = currentHull(state);
+    const o = state.origin;
+    const down = world.traceHull(o, [o[0], o[1], o[2] - 2], hull.hullIndex);
+    if (down.fraction < 1 && down.plane && down.plane.normal[2] >= GROUND_NORMAL_Z) {
+      state.velocity[2] = Math.sqrt(2 * CVAR.sv_gravity * JUMP_HEIGHT); // jump off bottom
+    } else {
+      const { forward: flat } = horizontalBasis(cmd.yaw);
+      const wall = world.traceHull(o, [o[0] + flat[0] * 24, o[1] + flat[1] * 24, o[2]], hull.hullIndex);
+      if (wall.fraction < 1 && wall.plane && Math.abs(wall.plane.normal[2]) < 0.5) {
+        const up = [o[0], o[1], o[2] + 40];
+        const clear = world.traceHull(up, [up[0] + flat[0] * 24, up[1] + flat[1] * 24, up[2]], hull.hullIndex);
+        if (clear.fraction === 1) { state.velocity[2] = 255; state.velocity[0] = flat[0] * 60; state.velocity[1] = flat[1] * 60; }
+      }
+    }
+  }
+  state.jumpHeld = cmd.jump;
+
   const { forward, right } = angleVectors(cmd.pitch, cmd.yaw);
   const wish = [0, 0, 0];
   for (let i = 0; i < 3; i++) {
