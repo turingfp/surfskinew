@@ -7,37 +7,43 @@ import * as THREE from '../vendor/three.module.js';
 import { gs2three } from './render.js';
 import { normalize, angleVectors } from './vec.js';
 
+// reload-sound sets shared by category (so we don't ship 50 reload clips)
+const RLD = {
+  pistol: { out: 'pistol_out', in: 'pistol_in', rack: 'pistol_slide' },
+  deagle: { out: 'deagle_out', in: 'deagle_in', rack: 'deagle_in' },
+  rifle: { out: 'rifle_out', in: 'rifle_in', rack: 'rifle_bolt' },
+  ak: { out: 'ak47_out', in: 'ak47_in', rack: 'ak47_bolt' },
+  sniper: { out: 'awp_out', in: 'awp_in', rack: 'awp_bolt' },
+  shotgun: { out: 'shotgun_pump', in: 'shotgun_insert', rack: 'shotgun_pump' },
+};
+function spec(o) { return { vol: 0.55, pellets: 1, tracer: 0xfff0a0, ...o, ...RLD[o.rld] }; }
+
+export const WEAPON_LIST = ['usp', 'glock', 'deagle', 'mp5', 'tmp', 'mac10', 'p90', 'ak47', 'm4a1', 'sg552', 'aug', 'scout', 'awp', 'g3sg1', 'm3', 'xm1014', 'm249'];
+
 const SPECS = {
-  usp: {
-    label: 'USP', sound: 'pistol', rate: 0.15, auto: false, kick: 0.6, spread: 0.006, pellets: 1, dmg: 24,
-    tracer: 0xbfe0ff, vol: 0.5, clip: 12, reserve: 120, reload: 2.2,
-    out: 'pistol_out', in: 'pistol_in', rack: 'pistol_slide',
-  },
-  deagle: {
-    label: 'DEAGLE', sound: 'deagle', rate: 0.25, auto: false, kick: 0.95, spread: 0.008, pellets: 1, dmg: 54,
-    tracer: 0xffe0b0, vol: 0.6, clip: 7, reserve: 35, reload: 2.2,
-    out: 'deagle_out', in: 'deagle_in', rack: 'deagle_in',
-  },
-  m4a1: {
-    label: 'M4A1', sound: 'rifle', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, pellets: 1, dmg: 28,
-    tracer: 0xfff0a0, vol: 0.5, clip: 30, reserve: 90, reload: 3.0,
-    out: 'rifle_out', in: 'rifle_in', rack: 'rifle_bolt',
-  },
-  ak47: {
-    label: 'AK47', sound: 'ak47', rate: 0.1, auto: true, kick: 0.7, spread: 0.03, pellets: 1, dmg: 33,
-    tracer: 0xffd27f, vol: 0.55, clip: 30, reserve: 90, reload: 2.5,
-    out: 'ak47_out', in: 'ak47_in', rack: 'ak47_bolt',
-  },
-  awp: {
-    label: 'AWP', sound: 'awp', rate: 1.5, auto: false, kick: 1.5, spread: 0.001, pellets: 1, dmg: 115,
-    tracer: 0x9fd0ff, vol: 0.7, clip: 10, reserve: 30, reload: 3.0,
-    out: 'awp_out', in: 'awp_in', rack: 'awp_bolt',
-  },
-  m3: {
-    label: 'M3', sound: 'shotgun', rate: 0.8, auto: false, kick: 1.1, spread: 0.07, pellets: 8, dmg: 11,
-    tracer: 0xffd890, vol: 0.6, clip: 8, reserve: 32, reload: 2.6,
-    out: 'shotgun_pump', in: 'shotgun_insert', rack: 'shotgun_pump',
-  },
+  // pistols (one-handed, semi)
+  usp: spec({ label: 'USP', sound: 'pistol', rate: 0.15, auto: false, kick: 0.6, spread: 0.006, dmg: 24, clip: 12, reserve: 120, reload: 2.2, rld: 'pistol', tracer: 0xbfe0ff }),
+  glock: spec({ label: 'GLOCK', sound: 'glock', rate: 0.13, auto: false, kick: 0.5, spread: 0.007, dmg: 18, clip: 20, reserve: 120, reload: 2.2, rld: 'pistol', tracer: 0xbfe0ff }),
+  deagle: spec({ label: 'DEAGLE', sound: 'deagle', rate: 0.25, auto: false, kick: 0.95, spread: 0.008, dmg: 54, clip: 7, reserve: 35, reload: 2.2, rld: 'deagle', tracer: 0xffe0b0 }),
+  // smgs (auto)
+  mp5: spec({ label: 'MP5', sound: 'mp5', rate: 0.08, auto: true, kick: 0.4, spread: 0.02, dmg: 26, clip: 30, reserve: 120, reload: 2.6, rld: 'rifle' }),
+  tmp: spec({ label: 'TMP', sound: 'tmp', rate: 0.07, auto: true, kick: 0.35, spread: 0.022, dmg: 20, clip: 30, reserve: 120, reload: 2.2, rld: 'rifle' }),
+  mac10: spec({ label: 'MAC10', sound: 'mac10', rate: 0.07, auto: true, kick: 0.45, spread: 0.03, dmg: 25, clip: 30, reserve: 100, reload: 2.7, rld: 'rifle' }),
+  p90: spec({ label: 'P90', sound: 'p90', rate: 0.07, auto: true, kick: 0.4, spread: 0.024, dmg: 22, clip: 50, reserve: 100, reload: 3.3, rld: 'rifle' }),
+  // rifles (auto)
+  ak47: spec({ label: 'AK47', sound: 'ak47', rate: 0.1, auto: true, kick: 0.7, spread: 0.03, dmg: 33, clip: 30, reserve: 90, reload: 2.5, rld: 'ak', tracer: 0xffd27f }),
+  m4a1: spec({ label: 'M4A1', sound: 'rifle', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, dmg: 28, clip: 30, reserve: 90, reload: 3.0, rld: 'rifle' }),
+  sg552: spec({ label: 'SG552', sound: 'sg552', rate: 0.09, auto: true, kick: 0.6, spread: 0.025, dmg: 30, clip: 30, reserve: 90, reload: 3.0, rld: 'rifle' }),
+  aug: spec({ label: 'AUG', sound: 'aug', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, dmg: 28, clip: 30, reserve: 90, reload: 3.3, rld: 'rifle' }),
+  // snipers (semi)
+  scout: spec({ label: 'SCOUT', sound: 'scout', rate: 1.25, auto: false, kick: 1.2, spread: 0.002, dmg: 75, clip: 10, reserve: 90, reload: 2.0, rld: 'sniper', tracer: 0x9fd0ff }),
+  awp: spec({ label: 'AWP', sound: 'awp', rate: 1.5, auto: false, kick: 1.5, spread: 0.001, dmg: 115, clip: 10, reserve: 30, reload: 3.0, rld: 'sniper', tracer: 0x9fd0ff }),
+  g3sg1: spec({ label: 'G3SG1', sound: 'g3sg1', rate: 0.25, auto: false, kick: 0.9, spread: 0.01, dmg: 40, clip: 20, reserve: 90, reload: 3.5, rld: 'sniper', tracer: 0x9fd0ff }),
+  // shotguns (pellets)
+  m3: spec({ label: 'M3', sound: 'shotgun', rate: 0.8, auto: false, kick: 1.1, spread: 0.07, pellets: 8, dmg: 11, clip: 8, reserve: 32, reload: 2.6, rld: 'shotgun', tracer: 0xffd890 }),
+  xm1014: spec({ label: 'XM1014', sound: 'xm1014', rate: 0.3, auto: false, kick: 0.9, spread: 0.08, pellets: 8, dmg: 9, clip: 7, reserve: 32, reload: 3.2, rld: 'shotgun', tracer: 0xffd890 }),
+  // lmg (auto)
+  m249: spec({ label: 'M249', sound: 'm249', rate: 0.08, auto: true, kick: 0.6, spread: 0.03, dmg: 32, clip: 100, reserve: 100, reload: 4.5, rld: 'rifle' }),
 };
 
 function makeFlashTexture() {
@@ -119,11 +125,21 @@ export class Weapons {
   }
 
   setWorld(w) { this.world = w; }
+  has(n) { return !!SPECS[n]; }
   setWeapon(n) {
     if (!SPECS[n] || n === this.current) return;
     this.current = n;
     this.reloading = false;
     this._playRaw('draw', 0.4);
+    if (this.vm) this.vm.kick(0.3);
+  }
+  // pick up / equip a weapon and top up its ammo
+  give(n) {
+    if (!SPECS[n]) return;
+    this.ammo[n] = { clip: SPECS[n].clip, reserve: SPECS[n].reserve };
+    this.current = n;
+    this.reloading = false;
+    this._playRaw('draw', 0.5);
     if (this.vm) this.vm.kick(0.3);
   }
   spec() { return SPECS[this.current]; }

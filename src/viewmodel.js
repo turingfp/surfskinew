@@ -47,20 +47,27 @@ export class Viewmodel {
   startReload(dur) { this.reloadDur = dur; this.reloadT = dur; }
 
   // Load real CS 1.6 StudioModel (.mdl) view models.
-  async loadMDLWeapons(map) {
-    for (const [name, def] of Object.entries(map)) {
-      const url = typeof def === 'string' ? def : def.url;
-      const skipBodyparts = (typeof def === 'object' && def.skip) ? def.skip : [];
-      try {
-        const data = await loadMDL(url, { skipBodyparts });
-        const weapon = this._makeMDLWeapon(data);
-        weapon.visible = false;
-        this.rig.add(weapon);
-        this.weapons[name] = weapon;
-      } catch (e) {
-        console.warn(`[viewmodel] MDL load failed ${name}:`, e.message || e);
-      }
+  has(name) { return !!this.weapons[name]; }
+
+  async loadOne(name, def) {
+    if (this.weapons[name] || this._loading?.[name]) return;
+    (this._loading ||= {})[name] = true;
+    const url = typeof def === 'string' ? def : def.url;
+    const skipBodyparts = (typeof def === 'object' && def.skip) ? def.skip : [];
+    try {
+      const data = await loadMDL(url, { skipBodyparts });
+      const weapon = this._makeMDLWeapon(data);
+      weapon.visible = false;
+      this.rig.add(weapon);
+      this.weapons[name] = weapon;
+    } catch (e) {
+      console.warn(`[viewmodel] MDL load failed ${name}:`, e.message || e);
     }
+    this._loading[name] = false;
+  }
+
+  async loadMDLWeapons(map) {
+    for (const [name, def] of Object.entries(map)) await this.loadOne(name, def);
     const first = Object.keys(this.weapons)[0];
     if (first) this.select(first);
     return Object.keys(this.weapons);

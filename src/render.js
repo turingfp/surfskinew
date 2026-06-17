@@ -259,6 +259,40 @@ export function buildProcLevel(brushes) {
   return group;
 }
 
+// Build a small spinnable world mesh from a parsed MDL (w_ weapon models), in
+// world space (GoldSrc -> three), centered at the origin so it spins in place.
+export function buildWorldModel(data) {
+  const group = new THREE.Group();
+  for (const g of data.groups) {
+    const n = g.positions.length / 3;
+    const pos = new Float32Array(n * 3);
+    const nrm = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = g.positions[i * 3]; pos[i * 3 + 1] = g.positions[i * 3 + 2]; pos[i * 3 + 2] = -g.positions[i * 3 + 1];
+      nrm[i * 3] = g.normals[i * 3]; nrm[i * 3 + 1] = g.normals[i * 3 + 2]; nrm[i * 3 + 2] = -g.normals[i * 3 + 1];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2));
+    let mat;
+    if (g.tex) {
+      const tex = new THREE.DataTexture(g.tex.rgba, g.tex.w, g.tex.h, THREE.RGBAFormat);
+      tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
+      mat = new THREE.MeshLambertMaterial({ map: tex, transparent: g.tex.masked, alphaTest: g.tex.masked ? 0.5 : 0, side: THREE.DoubleSide });
+    } else {
+      mat = new THREE.MeshLambertMaterial({ color: 0x999999 });
+    }
+    const m = new THREE.Mesh(geo, mat); m.frustumCulled = false;
+    group.add(m);
+  }
+  // centre on the model bbox so it rotates about itself
+  const box = new THREE.Box3().setFromObject(group);
+  const c = box.getCenter(new THREE.Vector3());
+  group.children.forEach((m) => m.position.sub(c));
+  return group;
+}
+
 // A simple vertical-gradient sky dome (the office WAD sky isn't shipped).
 export function buildSky(top = 0x9fb8d6, bottom = 0xdfe9f2, radius = 30000) {
   const geo = new THREE.SphereGeometry(radius, 32, 16);

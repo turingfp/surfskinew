@@ -4,11 +4,12 @@
 import * as THREE from '../vendor/three.module.js';
 import { loadBSP } from './bsp.js';
 import { CollisionWorld } from './hull.js';
-import { buildLevel, buildProcLevel, buildSky, gs2three } from './render.js';
+import { buildLevel, buildProcLevel, buildWorldModel, buildSky, gs2three } from './render.js';
 import { generateSurfArena, BrushWorld } from './procmap.js';
+import { loadMDL } from './mdl.js';
 import { createPlayerState, runTick, speed2d, waterMove, ladderMove } from './physics.js';
 import { Entities } from './entities.js';
-import { Weapons } from './weapons.js';
+import { Weapons, WEAPON_LIST } from './weapons.js';
 import { Net } from './net.js';
 import { RemotePlayers } from './remote.js';
 import { Viewmodel } from './viewmodel.js';
@@ -136,6 +137,15 @@ let runStarted = false;
 let netAcc = 0; // throttle state broadcasts to ~20 Hz
 let envWater = false, envLadder = false; // last movement environment (for HUD)
 let fpsEMA = 60; // smoothed frames-per-second for the HUD
+let pickups = []; // weapon pickups in the world {weaponId, origin, mesh, baseY, taken, respawnAt}
+const pickupModelCache = new Map(); // weaponId -> THREE template group
+
+// viewmodel sources for lazy loading (pistols skip the floating bodypart)
+const WEAPON_VMODELS = {};
+for (const id of WEAPON_LIST) {
+  WEAPON_VMODELS[id] = { url: `assets/models/cs/v_${id}.mdl`, skip: (id === 'usp' || id === 'deagle' || id === 'glock') ? ['rhand'] : [] };
+}
+function ensureViewmodel(id) { if (viewmodel && WEAPON_VMODELS[id] && !viewmodel.has(id)) viewmodel.loadOne(id, WEAPON_VMODELS[id]); }
 let checkpoint = null; // {origin, yaw} for practice save/load
 
 // ---- Map selection (?map=surf_green) ---------------------------------------
@@ -432,6 +442,8 @@ function frame(nowMs) {
     ammo: weapons ? weapons.ammoState() : null,
   });
 
+  updatePickups(dt);
+
   // multiplayer: interpolate remote avatars + broadcast our state at ~20 Hz
   if (remotePlayers) remotePlayers.render();
   if (net && net.connected) {
@@ -452,7 +464,7 @@ function frame(nowMs) {
 
   // overlay pass: the first-person weapon viewmodel
   if (viewmodel && viewmodel.current) {
-    if (input) viewmodel.select(input.weapon);
+    if (input) { ensureViewmodel(input.weapon); viewmodel.select(input.weapon); }
     viewmodel.setAspect(camera.aspect);
     viewmodel.update(dt, sp);
     renderer.clearDepth();
@@ -480,6 +492,50 @@ function addKill(html) {
   kf.appendChild(d);
   setTimeout(() => d.remove(), 4500);
   while (kf.children.length > 5) kf.removeChild(kf.firstChild);
+}
+
+// ---- Weapon pickups (from armoury_entity) ----------------------------------
+async function buildPickups() {
+  for (const p of pickups) if (p.mesh) scene.remove(p.mesh);
+  pickups = [];
+  if (!entities || !entities.pickups.length) return;
+  const ids = [...new Set(entities.pickups.map((p) => p.weaponId))];
+  await Promise.all(ids.map(async (id) => {
+    if (pickupModelCache.has(id)) return;
+    try { pickupModelCache.set(id, buildWorldModel(await loadMDL(`assets/models/cs/w/w_${id}.mdl`))); }
+    catch { pickupModelCache.set(id, null); }
+  }));
+  for (const p of entities.pickups) {
+    const tmpl = pickupModelCache.get(p.weaponId);
+    const mesh = tmpl ? tmpl.clone(true)
+      : new THREE.Mesh(new THREE.BoxGeometry(20, 8, 28), new THREE.MeshLambertMaterial({ color: 0xffcf6b }));
+    mesh.scale.setScalar(1.6);
+    const o = [p.origin[0], p.origin[1], p.origin[2] + 20];
+    const [x, y, z] = gs2three(o[0], o[1], o[2]);
+    mesh.position.set(x, y, z);
+    scene.add(mesh);
+    pickups.push({ weaponId: p.weaponId, origin: o, mesh, baseY: y, taken: false, respawnAt: 0 });
+  }
+  console.log(`[surf] weapon pickups: ${pickups.length}`);
+}
+
+function updatePickups(dt) {
+  if (!pickups.length) return;
+  const now = performance.now() / 1000;
+  const px = state.origin;
+  for (const p of pickups) {
+    if (p.taken) { if (now >= p.respawnAt) { p.taken = false; p.mesh.visible = true; } continue; }
+    p.mesh.rotation.y += dt * 1.6;
+    p.mesh.position.y = p.baseY + Math.sin(now * 2 + p.origin[0] * 0.01) * 4;
+    const dx = px[0] - p.origin[0], dy = px[1] - p.origin[1], dz = px[2] - p.origin[2];
+    if (dx * dx + dy * dy + dz * dz < 60 * 60 && weapons) {
+      weapons.give(p.weaponId);
+      ensureViewmodel(p.weaponId);
+      if (input) input.weapon = p.weaponId;
+      if (hud) hud.toast(`picked up ${p.weaponId.toUpperCase()}`, '#ffd166');
+      p.taken = true; p.mesh.visible = false; p.respawnAt = now + 12;
+    }
+  }
 }
 
 // ---- Boot ------------------------------------------------------------------
@@ -594,6 +650,10 @@ async function boot() {
     weapons.loadSounds({
       pistol: 'assets/sounds/pistol.wav', rifle: 'assets/sounds/rifle.wav', shotgun: 'assets/sounds/shotgun.wav',
       deagle: 'assets/sounds/deagle.wav', ak47: 'assets/sounds/ak47.wav', awp: 'assets/sounds/awp.wav',
+      glock: 'assets/sounds/glock.wav', mp5: 'assets/sounds/mp5.wav', tmp: 'assets/sounds/tmp.wav',
+      mac10: 'assets/sounds/mac10.wav', p90: 'assets/sounds/p90.wav', sg552: 'assets/sounds/sg552.wav',
+      aug: 'assets/sounds/aug.wav', scout: 'assets/sounds/scout.wav', g3sg1: 'assets/sounds/g3sg1.wav',
+      xm1014: 'assets/sounds/xm1014.wav', m249: 'assets/sounds/m249.wav',
       pistol_out: 'assets/sounds/pistol_out.wav', pistol_in: 'assets/sounds/pistol_in.wav', pistol_slide: 'assets/sounds/pistol_slide.wav',
       rifle_out: 'assets/sounds/rifle_out.wav', rifle_in: 'assets/sounds/rifle_in.wav', rifle_bolt: 'assets/sounds/rifle_bolt.wav',
       deagle_out: 'assets/sounds/deagle_out.wav', deagle_in: 'assets/sounds/deagle_in.wav',
@@ -695,6 +755,7 @@ async function boot() {
       rendererInfo: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }),
     };
 
+    buildPickups(); // spawn weapon pickups from the map (non-blocking)
     requestAnimationFrame(frame);
   } catch (err) {
     console.error(err);

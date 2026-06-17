@@ -11,6 +11,12 @@
 
 import { CONTENTS } from './constants.js';
 
+// CS armoury_entity "item" index -> our weapon id (grenades/armour skipped).
+const ARMOURY = {
+  0: 'mp5', 1: 'tmp', 2: 'p90', 3: 'mac10', 4: 'ak47', 5: 'sg552', 6: 'm4a1',
+  7: 'aug', 8: 'scout', 9: 'g3sg1', 10: 'awp', 11: 'm3', 12: 'xm1014', 13: 'm249',
+};
+
 function parseVec(s, d = [0, 0, 0]) {
   if (!s) return d;
   const p = s.split(/\s+/).map(Number);
@@ -26,6 +32,7 @@ export class Entities {
     this.ladders = [];
     this.waters = [];
     this.hurts = []; // trigger_hurt volumes (touch -> respawn)
+    this.pickups = []; // weapon pickups from armoury_entity
     this._index();
   }
 
@@ -55,6 +62,13 @@ export class Entities {
 
   _index() {
     for (const e of this.bsp.entities) {
+      // weapon pickups (point entities, not brush models)
+      if (e.classname === 'armoury_entity' && e.origin) {
+        const item = e.item === undefined ? 0 : parseInt(e.item, 10);
+        const weaponId = ARMOURY[item];
+        if (weaponId) this.pickups.push({ origin: parseVec(e.origin), weaponId, item });
+        continue;
+      }
       const mi = this._modelIndex(e);
       if (mi < 0) continue;
       const box = this._aabb(mi);
