@@ -8,17 +8,32 @@ import { gs2three } from './render.js';
 import { normalize, angleVectors } from './vec.js';
 
 const SPECS = {
-  pistol: {
+  usp: {
     label: 'USP', sound: 'pistol', rate: 0.15, auto: false, kick: 0.6, spread: 0.006, pellets: 1, dmg: 24,
     tracer: 0xbfe0ff, vol: 0.5, clip: 12, reserve: 120, reload: 2.2,
     out: 'pistol_out', in: 'pistol_in', rack: 'pistol_slide',
   },
-  rifle: {
+  deagle: {
+    label: 'DEAGLE', sound: 'deagle', rate: 0.25, auto: false, kick: 0.95, spread: 0.008, pellets: 1, dmg: 54,
+    tracer: 0xffe0b0, vol: 0.6, clip: 7, reserve: 35, reload: 2.2,
+    out: 'deagle_out', in: 'deagle_in', rack: 'deagle_in',
+  },
+  m4a1: {
     label: 'M4A1', sound: 'rifle', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, pellets: 1, dmg: 28,
     tracer: 0xfff0a0, vol: 0.5, clip: 30, reserve: 90, reload: 3.0,
     out: 'rifle_out', in: 'rifle_in', rack: 'rifle_bolt',
   },
-  shotgun: {
+  ak47: {
+    label: 'AK47', sound: 'ak47', rate: 0.1, auto: true, kick: 0.7, spread: 0.03, pellets: 1, dmg: 33,
+    tracer: 0xffd27f, vol: 0.55, clip: 30, reserve: 90, reload: 2.5,
+    out: 'ak47_out', in: 'ak47_in', rack: 'ak47_bolt',
+  },
+  awp: {
+    label: 'AWP', sound: 'awp', rate: 1.5, auto: false, kick: 1.5, spread: 0.001, pellets: 1, dmg: 115,
+    tracer: 0x9fd0ff, vol: 0.7, clip: 10, reserve: 30, reload: 3.0,
+    out: 'awp_out', in: 'awp_in', rack: 'awp_bolt',
+  },
+  m3: {
     label: 'M3', sound: 'shotgun', rate: 0.8, auto: false, kick: 1.1, spread: 0.07, pellets: 8, dmg: 11,
     tracer: 0xffd890, vol: 0.6, clip: 8, reserve: 32, reload: 2.6,
     out: 'shotgun_pump', in: 'shotgun_insert', rack: 'shotgun_pump',
@@ -67,7 +82,7 @@ export class Weapons {
     this.scene = scene;
     this.vm = viewmodel;
     this.world = null;
-    this.current = 'pistol';
+    this.current = 'usp';
     this.t = 0;
     this.lastFire = -10;
     this._wasAttack = false;

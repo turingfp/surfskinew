@@ -21,7 +21,7 @@ export class Input {
     this.autohop = false;
     this.noclip = false;
     this.scoreboard = false;
-    this.weapon = 'pistol';
+    this.weapon = 'usp';
     this._onActive = [];
     this._onRespawn = [];
     this._onReload = [];
@@ -120,9 +120,8 @@ export class Input {
     if (down && (code === 'KeyU' || code === 'Backspace')) this._onRespawn.forEach((f) => f());
     if (down && code === 'KeyC') this._onCheckpoint.forEach((f) => f('save'));
     if (down && code === 'KeyX') this._onCheckpoint.forEach((f) => f('load'));
-    if (down && code === 'Digit1') this.weapon = 'pistol';
-    if (down && code === 'Digit2') this.weapon = 'rifle';
-    if (down && code === 'Digit3') this.weapon = 'shotgun';
+    const wk = { Digit1: 'usp', Digit2: 'deagle', Digit3: 'm4a1', Digit4: 'ak47', Digit5: 'awp', Digit6: 'm3' };
+    if (down && wk[code]) this.weapon = wk[code];
     this.keys[code] = down;
     if (this.active && (code === 'Space' || code.startsWith('Arrow'))) e.preventDefault();
   }

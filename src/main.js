@@ -4,7 +4,8 @@
 import * as THREE from '../vendor/three.module.js';
 import { loadBSP } from './bsp.js';
 import { CollisionWorld } from './hull.js';
-import { buildLevel, buildSky, gs2three } from './render.js';
+import { buildLevel, buildProcLevel, buildSky, gs2three } from './render.js';
+import { generateSurfArena, BrushWorld } from './procmap.js';
 import { createPlayerState, runTick, speed2d, waterMove, ladderMove } from './physics.js';
 import { Entities } from './entities.js';
 import { Weapons } from './weapons.js';
@@ -121,6 +122,7 @@ let checkpoint = null; // {origin, yaw} for practice save/load
 const MAPS = {
   surf_ski_2: 'assets/maps/surf_ski_2.bsp',
   surf_green: 'assets/maps/surf_green.bsp',
+  surf_arena: 'proc', // procedurally generated (no BSP)
 };
 const mapParam = new URLSearchParams(location.search).get('map');
 const MAP_NAME = MAPS[mapParam] ? mapParam : 'surf_ski_2';
@@ -457,36 +459,50 @@ function addKill(html) {
 async function boot() {
   try {
     loadSkybox();
-    setStatus(`Loading ${MAP_NAME}.bsp …`);
-    const bsp = await loadBSP(MAPS[MAP_NAME]);
+    let stats, worldMins, worldMaxs;
 
-    setStatus('Loading textures …');
-    // Shipped CC0 Kenney "Prototype Textures" set, used for the ~55 surfaces
-    // whose textures live in an external WAD we don't bundle.
-    const KENNEY = [
-      'dark_01', 'dark_08', 'green_01', 'green_06', 'light_01', 'light_05',
-      'orange_01', 'orange_09', 'purple_01', 'purple_11', 'red_06', 'red_13',
-    ];
-    const loaded = await Promise.all(KENNEY.map((n) => tryLoadTexture(`assets/textures/kenney/${n}.png`)));
-    let fallbackTextures = loaded.filter(Boolean);
-    if (fallbackTextures.length === 0) {
-      // last-resort: a single shipped prototype grid, then a procedural one
-      const grid = await tryLoadTexture('assets/textures/prototype.png');
-      fallbackTextures = [grid || makeGridTexture()];
+    if (MAP_NAME === 'surf_arena') {
+      // ---- Procedural map: no BSP, analytic brush collision ----
+      setStatus('Generating surf_arena …');
+      const arena = generateSurfArena();
+      scene.add(buildProcLevel(arena.brushes));
+      world = new BrushWorld(arena.brushes);
+      spawn = arena.spawn;
+      entities = null;
+      killZ = arena.killZ;
+      bounds = arena.bounds;
+      worldMins = arena.bounds.min; worldMaxs = arena.bounds.max;
+      stats = { drawn: arena.brushes.length, materials: arena.brushes.length };
+      MAP_ZONES.surf_arena = { finish: arena.finish };
+      console.log(`[surf] surf_arena: ${arena.brushes.length} brushes`);
+    } else {
+      setStatus(`Loading ${MAP_NAME}.bsp …`);
+      const bsp = await loadBSP(MAPS[MAP_NAME]);
+
+      setStatus('Loading textures …');
+      const KENNEY = [
+        'dark_01', 'dark_08', 'green_01', 'green_06', 'light_01', 'light_05',
+        'orange_01', 'orange_09', 'purple_01', 'purple_11', 'red_06', 'red_13',
+      ];
+      const loaded = await Promise.all(KENNEY.map((n) => tryLoadTexture(`assets/textures/kenney/${n}.png`)));
+      let fallbackTextures = loaded.filter(Boolean);
+      if (fallbackTextures.length === 0) {
+        const grid = await tryLoadTexture('assets/textures/prototype.png');
+        fallbackTextures = [grid || makeGridTexture()];
+      }
+
+      setStatus('Building level geometry …');
+      const level = buildLevel(bsp, { fallbackTextures });
+      scene.add(level.group);
+      bounds = level.bounds;
+      killZ = bsp.models[0].mins[2] - 512;
+      world = new CollisionWorld(bsp);
+      spawn = parseSpawn(bsp);
+      entities = new Entities(bsp, world);
+      stats = level.stats;
+      worldMins = bsp.models[0].mins; worldMaxs = bsp.models[0].maxs;
+      console.log(`[surf] faces=${level.stats.drawn} lit=${level.stats.lit} solidModels=${world.solidModels.length}`);
     }
-    console.log(`[surf] fallback textures loaded: ${fallbackTextures.length}/${KENNEY.length}`);
-
-    setStatus('Building level geometry …');
-    const level = buildLevel(bsp, { fallbackTextures });
-    scene.add(level.group);
-    bounds = level.bounds;
-    killZ = bsp.models[0].mins[2] - 512;
-    console.log(`[surf] faces drawn=${level.stats.drawn} skipped=${level.stats.skipped} materials=${level.stats.materials}`);
-
-    world = new CollisionWorld(bsp);
-    spawn = parseSpawn(bsp);
-    entities = new Entities(bsp, world);
-    console.log(`[surf] solid models=${world.solidModels.length} entities: pushes=${entities.pushes.length} teleports=${entities.teleports.length} ladders=${entities.ladders.length} waters=${entities.waters.length}`);
 
     input = new Input();
     input.attach(canvas);
@@ -520,15 +536,16 @@ async function boot() {
     // if it fails to load, the game still runs without a weapon.
     viewmodel = new Viewmodel();
     viewmodel.loadMDLWeapons({
-      // USP is one-handed: skip the unused floating "rhand" bodypart.
-      pistol: { url: 'assets/models/cs/v_usp.mdl', skip: ['rhand'] },
-      rifle: 'assets/models/cs/v_m4a1.mdl',
-      shotgun: 'assets/models/cs/v_m3.mdl',
+      // pistols are one-handed: skip the floating "rhand" bodypart.
+      usp: { url: 'assets/models/cs/v_usp.mdl', skip: ['rhand'] },
+      deagle: { url: 'assets/models/cs/v_deagle.mdl', skip: ['rhand'] },
+      m4a1: 'assets/models/cs/v_m4a1.mdl',
+      ak47: 'assets/models/cs/v_ak47.mdl',
+      awp: 'assets/models/cs/v_awp.mdl',
+      m3: 'assets/models/cs/v_m3.mdl',
     }).then(async (names) => {
       if (!names.length) {
-        await viewmodel.load({
-          pistol: 'assets/models/pistol.glb', rifle: 'assets/models/rifle.glb', shotgun: 'assets/models/shotgun.glb',
-        });
+        await viewmodel.load({ usp: 'assets/models/pistol.glb', m4a1: 'assets/models/rifle.glb', m3: 'assets/models/shotgun.glb' });
         console.log('[surf] viewmodels: GLB fallback');
       } else {
         console.log(`[surf] viewmodels (CS .mdl): ${names.join(', ')}`);
@@ -546,8 +563,12 @@ async function boot() {
     };
     weapons.loadSounds({
       pistol: 'assets/sounds/pistol.wav', rifle: 'assets/sounds/rifle.wav', shotgun: 'assets/sounds/shotgun.wav',
+      deagle: 'assets/sounds/deagle.wav', ak47: 'assets/sounds/ak47.wav', awp: 'assets/sounds/awp.wav',
       pistol_out: 'assets/sounds/pistol_out.wav', pistol_in: 'assets/sounds/pistol_in.wav', pistol_slide: 'assets/sounds/pistol_slide.wav',
       rifle_out: 'assets/sounds/rifle_out.wav', rifle_in: 'assets/sounds/rifle_in.wav', rifle_bolt: 'assets/sounds/rifle_bolt.wav',
+      deagle_out: 'assets/sounds/deagle_out.wav', deagle_in: 'assets/sounds/deagle_in.wav',
+      ak47_out: 'assets/sounds/ak47_out.wav', ak47_in: 'assets/sounds/ak47_in.wav', ak47_bolt: 'assets/sounds/ak47_bolt.wav',
+      awp_out: 'assets/sounds/awp_out.wav', awp_in: 'assets/sounds/awp_in.wav', awp_bolt: 'assets/sounds/awp_bolt.wav',
       shotgun_pump: 'assets/sounds/shotgun_pump.wav', shotgun_insert: 'assets/sounds/shotgun_insert.wav',
       empty: 'assets/sounds/empty.wav', draw: 'assets/sounds/draw.wav',
     });
@@ -621,11 +642,11 @@ async function boot() {
     // without pointer lock. Harmless in normal play.
     window.__surf = {
       ready: true,
-      stats: level.stats,
+      stats,
       bounds,
       spawn,
-      worldMins: bsp.models[0].mins,
-      worldMaxs: bsp.models[0].maxs,
+      worldMins,
+      worldMaxs,
       getState: () => ({
         origin: [...state.origin], velocity: [...state.velocity],
         onground: state.onground, ducking: state.ducking, speed: speed2d(state),

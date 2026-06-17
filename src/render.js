@@ -222,6 +222,34 @@ export function buildLevel(bsp, { fallbackTextures = [] } = {}) {
 
 function nextPow2(n) { let p = 1; while (p < n) p *= 2; return p; }
 
+// Build Three meshes for a procedural brush map (see procmap.js). Brushes are
+// oriented boxes; ramps render as translucent green "glass".
+export function buildProcLevel(brushes) {
+  const group = new THREE.Group();
+  group.name = 'surf_arena';
+  for (const b of brushes) {
+    const geo = new THREE.BoxGeometry(b.he[0] * 2, b.he[1] * 2, b.he[2] * 2);
+    const X = gs2three(b.axes[0][0], b.axes[0][1], b.axes[0][2]);
+    const Y = gs2three(b.axes[1][0], b.axes[1][1], b.axes[1][2]);
+    const Z = gs2three(b.axes[2][0], b.axes[2][1], b.axes[2][2]);
+    const basis = new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(X[0], X[1], X[2]), new THREE.Vector3(Y[0], Y[1], Y[2]), new THREE.Vector3(Z[0], Z[1], Z[2]),
+    );
+    const mat = new THREE.MeshLambertMaterial({
+      color: b.color,
+      transparent: !!b.glass,
+      opacity: b.glass ? 0.55 : 1,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.quaternion.setFromRotationMatrix(basis);
+    const [px, py, pz] = gs2three(b.center[0], b.center[1], b.center[2]);
+    mesh.position.set(px, py, pz);
+    group.add(mesh);
+  }
+  return group;
+}
+
 // A simple vertical-gradient sky dome (the office WAD sky isn't shipped).
 export function buildSky(top = 0x9fb8d6, bottom = 0xdfe9f2, radius = 30000) {
   const geo = new THREE.SphereGeometry(radius, 32, 16);
