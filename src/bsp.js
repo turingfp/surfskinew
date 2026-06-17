@@ -45,6 +45,13 @@ export class BSP {
     this.parseTextures();
     this.parseClipNodes();
     this.parseModels();
+    this.parseLighting();
+  }
+
+  // ---- LIGHTING (per-face lightmaps, RGB) ----------------------------------
+  parseLighting() {
+    const { offset, length } = this.lump(8); // LUMP_LIGHTING
+    this.lighting = length > 0 ? new Uint8Array(this.buf, offset, length) : new Uint8Array(0);
   }
 
   // ---- ENTITIES (text) -----------------------------------------------------

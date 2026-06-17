@@ -59,50 +59,60 @@ function embeddedTexture(tex) {
   return t;
 }
 
-function materialFor(tex, fallbacks) {
+// Unlit base × lightmap, the authentic GoldSrc shading (lightMap uses uv1).
+function materialFor(tex, fallbacks, lightMap) {
   const masked = tex.masked;
+  const common = lightMap ? { lightMap, lightMapIntensity: 2.2 } : {};
   if (tex.embedded && tex.rgba) {
-    return new THREE.MeshLambertMaterial({
-      map: embeddedTexture(tex),
-      transparent: masked,
-      alphaTest: masked ? 0.5 : 0,
-      side: THREE.DoubleSide,
+    return new THREE.MeshBasicMaterial({
+      map: embeddedTexture(tex), transparent: masked, alphaTest: masked ? 0.5 : 0,
+      side: THREE.DoubleSide, ...common,
     });
   }
   const name = tex.name || 'world';
-  // Pick one of the shipped CC0 Kenney prototype textures by name hash so the
-  // many external/WAD surfaces get stable, varied looks. A faint name tint
-  // keeps adjacent surfaces distinguishable without hiding the texture.
   if (fallbacks && fallbacks.length) {
     const map = fallbacks[nameHash(name) % fallbacks.length].clone();
     map.needsUpdate = true;
     const tint = nameColor(name).lerp(new THREE.Color(0xffffff), 0.7);
-    return new THREE.MeshLambertMaterial({ map, color: tint, side: THREE.DoubleSide });
+    return new THREE.MeshBasicMaterial({ map, color: tint, side: THREE.DoubleSide, ...common });
   }
-  return new THREE.MeshLambertMaterial({ color: nameColor(name), side: THREE.DoubleSide });
+  return new THREE.MeshBasicMaterial({ color: nameColor(name), side: THREE.DoubleSide, ...common });
+}
+
+// Compute a face's lightmap size + texture-space mins from its texinfo + verts.
+function faceLightmap(bsp, face, ti, poly) {
+  if (face.lightofs < 0 || !bsp.lighting || bsp.lighting.length === 0) return null;
+  let minS = Infinity, maxS = -Infinity, minT = Infinity, maxT = -Infinity;
+  for (const v of poly) {
+    const s = dot(v, [ti.s[0], ti.s[1], ti.s[2]]) + ti.s[3];
+    const t = dot(v, [ti.t[0], ti.t[1], ti.t[2]]) + ti.t[3];
+    if (s < minS) minS = s; if (s > maxS) maxS = s;
+    if (t < minT) minT = t; if (t > maxT) maxT = t;
+  }
+  const sMin = Math.floor(minS / 16), sMax = Math.ceil(maxS / 16);
+  const tMin = Math.floor(minT / 16), tMax = Math.ceil(maxT / 16);
+  const w = sMax - sMin + 1, h = tMax - tMin + 1;
+  if (w < 1 || h < 1 || w > 256 || h > 256) return null;
+  if (face.lightofs + w * h * 3 > bsp.lighting.length) return null;
+  return { w, h, sMin, tMin };
 }
 
 // Build all renderable geometry. `fallbackTextures` is an array of THREE.Texture
 // (the shipped Kenney prototype set) used for the external/WAD surfaces.
 export function buildLevel(bsp, { fallbackTextures = [] } = {}) {
   const group = new THREE.Group();
-  group.name = 'surf_ski_2';
+  group.name = 'surf_level';
 
-  // Bucket faces by miptex so we can merge them into one mesh per texture.
-  const buckets = new Map(); // miptex -> { positions, normals, uvs, indices, vbase }
-
-  const bounds = {
-    min: [Infinity, Infinity, Infinity],
-    max: [-Infinity, -Infinity, -Infinity],
-  };
+  const bounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
   const grow = (x, y, z) => {
     if (x < bounds.min[0]) bounds.min[0] = x; if (x > bounds.max[0]) bounds.max[0] = x;
     if (y < bounds.min[1]) bounds.min[1] = y; if (y > bounds.max[1]) bounds.max[1] = y;
     if (z < bounds.min[2]) bounds.min[2] = z; if (z > bounds.max[2]) bounds.max[2] = z;
   };
 
-  let drawn = 0, skipped = 0;
-
+  // ---- Pass 1: collect renderable faces (+ lightmap info) ----
+  const recs = [];
+  let skipped = 0;
   for (const face of bsp.faces) {
     const ti = bsp.texinfo[face.texinfo];
     if (!ti) { skipped++; continue; }
@@ -110,51 +120,89 @@ export function buildLevel(bsp, { fallbackTextures = [] } = {}) {
     const name = (tex.name || '').toLowerCase();
     if (isSkyName(name) || SKIP_TEXTURES.has(name) || (ti.flags & 1)) { skipped++; continue; }
 
-    const plane = bsp.planes[face.planenum];
-    let nx = plane.normal[0], ny = plane.normal[1], nz = plane.normal[2];
-    if (face.side) { nx = -nx; ny = -ny; nz = -nz; }
-    // normal transformed to three space (no translation)
-    const tnx = nx, tny = nz, tnz = -ny;
-
-    const tw = tex.width || 64, th = tex.height || 64;
-
-    // collect polygon vertices (GS coords) in winding order
     const poly = [];
     for (let j = 0; j < face.numedges; j++) {
       const se = bsp.surfedges[face.firstedge + j];
-      let vi;
-      if (se >= 0) vi = bsp.edges[se * 2];
-      else vi = bsp.edges[-se * 2 + 1];
-      poly.push([
-        bsp.vertices[vi * 3],
-        bsp.vertices[vi * 3 + 1],
-        bsp.vertices[vi * 3 + 2],
-      ]);
+      const vi = se >= 0 ? bsp.edges[se * 2] : bsp.edges[-se * 2 + 1];
+      poly.push([bsp.vertices[vi * 3], bsp.vertices[vi * 3 + 1], bsp.vertices[vi * 3 + 2]]);
     }
     if (poly.length < 3) { skipped++; continue; }
+    recs.push({ face, ti, tex, poly, lm: faceLightmap(bsp, face, ti, poly), tile: null });
+  }
+
+  // ---- Pack lightmaps into an atlas (shelf packing) ----
+  const ATLAS_W = 2048, PAD = 1;
+  let atlasH = 0;
+  {
+    const withLM = recs.filter((r) => r.lm).sort((a, b) => b.lm.h - a.lm.h);
+    let x = PAD + 2, y = PAD, shelfH = 0; // reserve a white texel block at (0,0)
+    for (const r of withLM) {
+      const w = r.lm.w + PAD, h = r.lm.h + PAD;
+      if (x + w > ATLAS_W) { x = PAD; y += shelfH; shelfH = 0; }
+      if (y + h > 4096) { r.lm = null; continue; } // overflow -> no lightmap
+      r.tile = { x, y };
+      x += w; if (h > shelfH) shelfH = h;
+    }
+    atlasH = Math.min(4096, nextPow2(y + shelfH + PAD));
+  }
+
+  // ---- Build the atlas texture (white background; copy luxels) ----
+  let lightMap = null;
+  if (atlasH > 0 && recs.some((r) => r.lm)) {
+    const data = new Uint8Array(ATLAS_W * atlasH * 4).fill(255);
+    for (const r of recs) {
+      if (!r.lm || !r.tile) continue;
+      const { w, h } = r.lm; const ofs = r.face.lightofs;
+      for (let ty = 0; ty < h; ty++) {
+        for (let tx = 0; tx < w; tx++) {
+          const src = ofs + (ty * w + tx) * 3;
+          const dx = r.tile.x + tx, dy = r.tile.y + ty;
+          const d = (dy * ATLAS_W + dx) * 4;
+          data[d] = bsp.lighting[src]; data[d + 1] = bsp.lighting[src + 1];
+          data[d + 2] = bsp.lighting[src + 2]; data[d + 3] = 255;
+        }
+      }
+    }
+    lightMap = new THREE.DataTexture(data, ATLAS_W, atlasH, THREE.RGBAFormat);
+    lightMap.colorSpace = THREE.SRGBColorSpace;
+    lightMap.minFilter = THREE.LinearFilter;
+    lightMap.magFilter = THREE.LinearFilter;
+    lightMap.needsUpdate = true;
+  }
+
+  // ---- Pass 2: build geometry grouped by texture, with base + lightmap UVs ----
+  const buckets = new Map();
+  let drawn = 0, lit = 0;
+  for (const r of recs) {
+    const { face, ti, tex, poly, lm, tile } = r;
+    const tw = tex.width || 64, th = tex.height || 64;
+    const plane = bsp.planes[face.planenum];
+    let nx = plane.normal[0], ny = plane.normal[1], nz = plane.normal[2];
+    if (face.side) { nx = -nx; ny = -ny; nz = -nz; }
+    const tnx = nx, tny = nz, tnz = -ny;
 
     let bucket = buckets.get(ti.miptex);
-    if (!bucket) {
-      bucket = { positions: [], normals: [], uvs: [], indices: [], vbase: 0, tex };
-      buckets.set(ti.miptex, bucket);
-    }
-
+    if (!bucket) { bucket = { positions: [], normals: [], uvs: [], uv1: [], indices: [], vbase: 0, tex }; buckets.set(ti.miptex, bucket); }
     const base = bucket.vbase;
     for (const v of poly) {
       const [tx, ty, tz] = gs2three(v[0], v[1], v[2]);
       grow(tx, ty, tz);
       bucket.positions.push(tx, ty, tz);
       bucket.normals.push(tnx, tny, tnz);
-      const u = (dot(v, [ti.s[0], ti.s[1], ti.s[2]]) + ti.s[3]) / tw;
-      const vv = (dot(v, [ti.t[0], ti.t[1], ti.t[2]]) + ti.t[3]) / th;
-      bucket.uvs.push(u, vv);
+      const s = dot(v, [ti.s[0], ti.s[1], ti.s[2]]) + ti.s[3];
+      const t = dot(v, [ti.t[0], ti.t[1], ti.t[2]]) + ti.t[3];
+      bucket.uvs.push(s / tw, t / th);
+      if (lm && tile) {
+        const lu = (tile.x + (s / 16 - lm.sMin) + 0.5) / ATLAS_W;
+        const lv = (tile.y + (t / 16 - lm.tMin) + 0.5) / atlasH;
+        bucket.uv1.push(lu, lv);
+      } else {
+        bucket.uv1.push(0.5 / ATLAS_W, 0.5 / Math.max(1, atlasH)); // reserved white texel
+      }
     }
-    // triangle fan
-    for (let j = 1; j < poly.length - 1; j++) {
-      bucket.indices.push(base, base + j, base + j + 1);
-    }
+    for (let j = 1; j < poly.length - 1; j++) bucket.indices.push(base, base + j, base + j + 1);
     bucket.vbase += poly.length;
-    drawn++;
+    drawn++; if (lm) lit++;
   }
 
   for (const [, bucket] of buckets) {
@@ -162,15 +210,17 @@ export function buildLevel(bsp, { fallbackTextures = [] } = {}) {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.normals, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs, 2));
+    if (lightMap) geo.setAttribute('uv1', new THREE.Float32BufferAttribute(bucket.uv1, 2));
     geo.setIndex(bucket.indices);
-    const mat = materialFor(bucket.tex, fallbackTextures);
-    const mesh = new THREE.Mesh(geo, mat);
+    const mesh = new THREE.Mesh(geo, materialFor(bucket.tex, fallbackTextures, lightMap));
     mesh.frustumCulled = true;
     group.add(mesh);
   }
 
-  return { group, bounds, stats: { drawn, skipped, materials: buckets.size } };
+  return { group, bounds, stats: { drawn, skipped, lit, materials: buckets.size, atlasH } };
 }
+
+function nextPow2(n) { let p = 1; while (p < n) p *= 2; return p; }
 
 // A simple vertical-gradient sky dome (the office WAD sky isn't shipped).
 export function buildSky(top = 0x9fb8d6, bottom = 0xdfe9f2, radius = 30000) {
