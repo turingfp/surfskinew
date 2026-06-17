@@ -25,6 +25,7 @@ export class Entities {
     this.teleports = [];
     this.ladders = [];
     this.waters = [];
+    this.hurts = []; // trigger_hurt volumes (touch -> respawn)
     this._index();
   }
 
@@ -75,6 +76,9 @@ export class Entities {
         case 'func_conveyor_water':
           this.waters.push({ mi, box });
           break;
+        case 'trigger_hurt':
+          this.hurts.push({ mi, box });
+          break;
         default:
           break;
       }
@@ -101,6 +105,10 @@ export class Entities {
   onLadder(p) { for (const l of this.ladders) if (this._inside(l, p)) return true; return false; }
 
   apply(state) {
+    // trigger_hurt at the bottom of a run = fell off, reset to spawn
+    for (const h of this.hurts) {
+      if (this._inside(h, state.origin)) return { hurt: true };
+    }
     for (const t of this.teleports) {
       if (t.dest && this._inside(t, state.origin)) {
         state.origin = t.dest.origin.slice();

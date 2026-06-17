@@ -289,9 +289,10 @@ function stepPhysics(dt) {
     runTick(state, cmd, world, { autohop: input.autohop }, dt);
   }
 
-  // boosters (trigger_push) + teleports (trigger_teleport)
+  // boosters (trigger_push) + teleports (trigger_teleport) + trigger_hurt
   if (entities) {
     const r = entities.apply(state);
+    if (r.hurt) { respawn(); return; } // fell into a kill trigger
     if (r.teleported) {
       if (r.teleported.yaw != null && input) input.yaw = r.teleported.yaw;
       prevOrigin = copy(state.origin); // avoid a long interpolation streak
