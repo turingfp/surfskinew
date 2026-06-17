@@ -96,6 +96,17 @@
   #killfeed { position:fixed; right:14px; top:120px; z-index:7; pointer-events:none; display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
   #killfeed .kf { background:rgba(10,16,22,0.6); border-radius:5px; padding:3px 9px; font-size:13px; color:#dfe9f2; }
   #killfeed .kf b { color:var(--cs); }
+  /* Chat (CS 1.6 style: messages bottom-left, input row above the speed HUD) */
+  #chatlog { position:fixed; left:14px; bottom:120px; z-index:7; pointer-events:none;
+    display:flex; flex-direction:column; gap:2px; max-width:60vw; }
+  #chatlog .cm { font-size:14px; color:#e9eef2; text-shadow:0 1px 3px #000, 0 0 2px #000;
+    opacity:0; transition:opacity .3s; }
+  #chatlog .cm.show { opacity:1; }
+  #chatlog .cm b { color:var(--accent); }
+  #chatbar { position:fixed; left:14px; bottom:96px; z-index:9; display:none; align-items:center; gap:8px; }
+  #chatbar label { color:var(--cs); font-size:14px; text-shadow:0 1px 3px #000; }
+  #chatbar input { width:48vw; max-width:520px; background:rgba(10,16,22,0.7); color:#fff;
+    border:1px solid rgba(127,209,174,0.5); border-radius:4px; padding:6px 10px; font:inherit; font-size:14px; outline:none; }
   /* pickup prompt + underwater tint */
   #usePrompt { position:fixed; left:50%; top:58%; transform:translateX(-50%); z-index:7; display:none;
     pointer-events:none; color:#fff; font-size:15px; letter-spacing:1px; text-shadow:0 2px 6px #000;
@@ -163,6 +174,8 @@
     <div class="sb-hint">hold TAB</div>
   </div>
   <div id="killfeed"></div>
+  <div id="chatlog"></div>
+  <div id="chatbar"><label>Say:</label><input id="chatinput" type="text" maxlength="120" autocomplete="off" /></div>
 
   <!-- On-screen touch controls (shown only on touch devices) -->
   <div id="touch">

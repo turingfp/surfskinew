@@ -22,6 +22,7 @@ export class Input {
     this.noclip = false;
     this.cheats = false; // noclip + checkpoint teleport only in a custom room
     this.scoreboard = false;
+    this.chatting = false; // chat box open: suppress look + movement
     this.weapon = 'usp';
     // touch state
     this.isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
@@ -34,6 +35,7 @@ export class Input {
     this._onReload = [];
     this._onCheckpoint = [];
     this._onUse = [];
+    this._onChat = [];
   }
 
   attach(canvas) {
@@ -41,13 +43,14 @@ export class Input {
 
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === canvas;
-      // If the user pressed Esc to release the lock, pause back to the overlay.
-      if (!this.locked && this.active && this._wasLocked) this.stop();
+      // If the user pressed Esc to release the lock, pause back to the overlay
+      // (but not when we released it on purpose to open the chat box).
+      if (!this.locked && this.active && this._wasLocked && !this.chatting) this.stop();
       this._wasLocked = this.locked;
     });
 
     document.addEventListener('mousemove', (e) => {
-      if (!this.active) return;
+      if (!this.active || this.chatting) return;
       this.yaw -= e.movementX * this.sensitivity;
       // +pitch looks down in our convention, so mouse-up (movementY<0) must
       // increase-toward-up => pitch += movementY for the non-inverted default.
@@ -173,7 +176,19 @@ export class Input {
   onReload(fn) { this._onReload.push(fn); }
   onCheckpoint(fn) { this._onCheckpoint.push(fn); }
   onUse(fn) { this._onUse.push(fn); }
+  onChat(fn) { this._onChat.push(fn); }
   onBlocked(fn) { this._onBlocked = fn; }
+
+  // Open/close the chat box: free the mouse + suppress look/move while typing.
+  setChatting(on) {
+    this.chatting = on;
+    if (on) {
+      this.keys = Object.create(null); // drop any held movement keys
+      if (document.exitPointerLock) { try { document.exitPointerLock(); } catch { /* ignore */ } }
+    } else if (this.active) {
+      this._requestLock();
+    }
+  }
   setCheats(on) { this.cheats = on; if (!on) this.noclip = false; }
   _fireActive() { this._onActive.forEach((f) => f(this.active)); }
 
@@ -190,6 +205,7 @@ export class Input {
       this.start();
       if (code === 'Enter' || code === 'Space') { e.preventDefault(); return; }
     }
+    if (down && this.active && (code === 'KeyY' || code === 'KeyT')) { this._onChat.forEach((f) => f()); e.preventDefault(); return; }
     if (down && code === 'KeyB') this.autohop = !this.autohop;
     if (down && code === 'KeyV') { if (this.cheats) this.noclip = !this.noclip; else this._onBlocked?.('noclip'); }
     if (down && code === 'KeyR') this._onReload.forEach((f) => f());
@@ -204,6 +220,8 @@ export class Input {
   }
 
   command() {
+    // While typing in chat, hold position (no move, no new look this tick).
+    if (this.chatting) return { forwardmove: 0, sidemove: 0, yaw: this.yaw, pitch: this.pitch, jump: false, duck: false };
     const k = this.keys;
     let fmove = 0, smove = 0;
     if (k['KeyW'] || k['ArrowUp']) fmove += FORWARD_SPEED;

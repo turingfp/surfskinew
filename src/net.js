@@ -40,14 +40,17 @@ export class Net {
     const shotAction = this.room.makeAction('shot');
     const hitAction = this.room.makeAction('hit');
     const fragAction = this.room.makeAction('frag');
+    const chatAction = this.room.makeAction('chat');
     stateAction.onMessage = (data, meta) => this._emit('state', meta.peerId, data);
     shotAction.onMessage = (data, meta) => this._emit('shot', meta.peerId, data);
     hitAction.onMessage = (data, meta) => this._emit('hit', meta.peerId, data);
     fragAction.onMessage = (data, meta) => this._emit('frag', meta.peerId, data);
+    chatAction.onMessage = (data, meta) => this._emit('chat', meta.peerId, data);
     this.sendState = (d) => stateAction.send(d);
     this.sendShot = (d) => shotAction.send(d);
     this.sendHit = (peerId, d) => hitAction.send(d, peerId); // targeted to the victim
     this.sendFrag = (d) => fragAction.send(d);
+    this.sendChat = (d) => chatAction.send(d);
 
     // 0.25 exposes these as setter properties, not methods.
     this.room.onPeerJoin = (id) => { this.peers.add(id); this._emit('count', this.count); };

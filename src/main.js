@@ -191,16 +191,35 @@ function applySettings() {
 function parseSpawn(bsp) {
   const list = bsp.entitiesByClass('info_player_start')
     .concat(bsp.entitiesByClass('info_player_deathmatch'));
+  const all = [];
   for (const e of list) {
     if (!e.origin) continue;
     const o = e.origin.split(/\s+/).map(Number);
     if (o.length === 3 && o.every(Number.isFinite)) {
       const yaw = e.angles ? (Number(e.angles.split(/\s+/)[1]) || 0) * Math.PI / 180 : 0;
-      return { origin: o, yaw };
+      all.push({ origin: o, yaw });
     }
   }
-  // fallback: centre of world, up high
-  return { origin: [0, 0, 0], yaw: 0 };
+  if (!all.length) all.push({ origin: [0, 0, 0], yaw: 0 }); // fallback: world centre
+  return { ...all[0], all };
+}
+
+// Pick a spawn that no remote player is currently standing on, so respawns
+// don't stack players on top of each other (spawn clipping). Falls back to a
+// random spawn, or jitters the single spawn when a map only has one.
+function chooseSpawn() {
+  const all = (spawn && spawn.all) || [spawn];
+  if (all.length > 1 && remotePlayers) {
+    const occupied = [];
+    remotePlayers.forEach((id, o) => occupied.push(o));
+    const free = all.filter((s) => !occupied.some((o) => Math.hypot(o[0] - s.origin[0], o[1] - s.origin[1], o[2] - s.origin[2]) < 48));
+    const pool = free.length ? free : all;
+    return pool[(Math.random() * pool.length) | 0];
+  }
+  if (all.length > 1) return all[(Math.random() * all.length) | 0];
+  // single spawn: small horizontal jitter so co-spawned players don't overlap
+  const s = all[0];
+  return { origin: [s.origin[0] + (Math.random() - 0.5) * 40, s.origin[1] + (Math.random() - 0.5) * 40, s.origin[2]], yaw: s.yaw };
 }
 
 // Nudge a fresh spawn out of any solid it overlaps, then drop it.
@@ -220,9 +239,10 @@ function respawn() {
     try { localStorage.setItem(PB_TIME_KEY, String(pbTime)); } catch { /* ignore */ }
     if (hud) hud.toast(`LONGEST RUN  ${fmtClock(pbTime)}`, '#7fd1ae');
   }
-  state = createPlayerState(settleSpawn(spawn.origin));
+  const sp = chooseSpawn();
+  state = createPlayerState(settleSpawn(sp.origin));
   state.velocity = [0, 0, 0];
-  if (input) { input.yaw = spawn.yaw; input.pitch = 0; }
+  if (input) { input.yaw = sp.yaw; input.pitch = 0; }
   prevOrigin = copy(state.origin);
   runTime = 0; runStarted = false; finishTime = null;
   health = 100;
@@ -728,11 +748,59 @@ async function boot() {
       if (data.by === playerName) kills++;
     });
     net.on('count', (n) => { const el = document.getElementById('peercount'); if (el) el.textContent = n; });
+    net.on('chat', (id, data) => { if (data && data.msg) addChat(data.nm || 'player', data.msg); });
     weapons.onShot = (data) => { if (net.connected) net.broadcastShot(data); };
+
+    // ---- Text chat (CS 1.6 style): Y/T to open, Enter sends, Esc cancels ----
+    const chatBar = document.getElementById('chatbar');
+    const chatInput = document.getElementById('chatinput');
+    const chatLog = document.getElementById('chatlog');
+    function addChat(name, msg) {
+      if (!chatLog) return;
+      const line = document.createElement('div');
+      line.className = 'cm';
+      line.innerHTML = `<b>${escHtml(name)}</b> : ${escHtml(msg)}`;
+      chatLog.appendChild(line);
+      requestAnimationFrame(() => line.classList.add('show'));
+      while (chatLog.children.length > 6) chatLog.removeChild(chatLog.firstChild);
+      // fade + remove after a few seconds (messages stay while the box is open)
+      const ttl = setTimeout(() => { line.classList.remove('show'); setTimeout(() => line.remove(), 400); }, 9000);
+      line._ttl = ttl;
+    }
+    function openChat() {
+      if (!chatBar || !chatInput || (chatBar.style.display === 'flex')) return;
+      chatBar.style.display = 'flex';
+      if (input) input.setChatting(true);
+      chatInput.value = '';
+      setTimeout(() => chatInput.focus(), 0);
+    }
+    function closeChat() {
+      if (!chatBar) return;
+      chatBar.style.display = 'none';
+      chatInput.blur();
+      if (input) input.setChatting(false);
+    }
+    if (input) input.onChat(openChat);
+    if (chatInput) {
+      chatInput.addEventListener('keydown', (e) => {
+        e.stopPropagation(); // don't leak into game key handling
+        if (e.key === 'Enter') {
+          const msg = chatInput.value.trim().slice(0, 120);
+          if (msg) { addChat(`${playerName} (you)`, msg); if (net && net.connected) net.sendChat({ nm: playerName, msg }); }
+          closeChat();
+        } else if (e.key === 'Escape') {
+          closeChat();
+        }
+      });
+    }
 
     const joinBtn = document.getElementById('mp-join');
     const roomInput = document.getElementById('mp-room');
     const mpStatus = document.getElementById('mp-status');
+    // Allow ?room=name to preselect a multiplayer room (handy for sharing a
+    // private match link, and for multi-session testing).
+    const roomParam = new URLSearchParams(location.search).get('room');
+    if (roomParam && roomInput) roomInput.value = roomParam.slice(0, 24);
     // Fair-play: noclip + checkpoint teleport are disabled in the shared public
     // room; renaming the room to your own match enables everything.
     function applyRoomRules(room) {
@@ -814,6 +882,12 @@ async function boot() {
       selectWeapon: (n) => { if (input) input.weapon = n; if (viewmodel) viewmodel.select(n); },
       addBot: (o, y) => remotePlayers && remotePlayers.update('TESTBOT', { o, y: y || 0, nm: 'BOT' }),
       pickups: () => pickups.map((p) => ({ id: p.weaponId, o: [...p.origin] })),
+      netInfo: () => ({
+        connected: !!(net && net.connected),
+        count: net ? net.count : 1,
+        peers: net ? [...net.peers] : [],
+        remotes: remotePlayers ? [...remotePlayers.players.keys()].map((id) => ({ id, o: remotePlayers.players.get(id).cur && remotePlayers.players.get(id).cur.o })) : [],
+      }),
       tick: (cmd, dt = FIXED_DT) => { runTick(state, cmd, world, { autohop: false }, dt); return speed2d(state); },
       // Tick against a caller-supplied (e.g. open-air) world — isolates the
       // movement maths from level collision for testing.
