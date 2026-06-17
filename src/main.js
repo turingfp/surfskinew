@@ -105,6 +105,25 @@ async function tryLoadTexture(url) {
   }
 }
 
+// Load the real WAD textures a map needs (decoded to PNGs at build time, see
+// tools/extract_wads.mjs). Only fetches names present in the manifest.
+async function loadWadTextures(bsp) {
+  const map = new Map();
+  let manifest;
+  try { manifest = new Set(await (await fetch('assets/wadtex/manifest.json')).json()); } catch { return map; }
+  const want = new Set();
+  for (const t of bsp.textures) {
+    const nm = (t.name || '').toLowerCase();
+    if (!t.embedded && nm && manifest.has(nm)) want.add(nm);
+  }
+  await Promise.all([...want].map(async (nm) => {
+    const tex = await tryLoadTexture(`assets/wadtex/${encodeURIComponent(nm)}.png`);
+    if (tex) map.set(nm, tex);
+  }));
+  console.log(`[surf] WAD textures: ${map.size}/${want.size}`);
+  return map;
+}
+
 // ---- World / player state --------------------------------------------------
 let world, state, input, hud, viewmodel, entities, weapons;
 let net, remotePlayers;
@@ -126,6 +145,7 @@ const MAPS = {
   surf_nice_fly_3: 'assets/maps/surf_nice_fly_3.bsp',
   surf_sand: 'assets/maps/surf_sand.bsp',
   surf_egypt: 'assets/maps/surf_egypt.bsp',
+  fy_pool_day: 'assets/maps/fy_pool_day.bsp',
   surf_arena: 'proc', // procedurally generated (no BSP)
 };
 const mapParam = new URLSearchParams(location.search).get('map');
@@ -498,8 +518,11 @@ async function boot() {
         fallbackTextures = [grid || makeGridTexture()];
       }
 
+      setStatus('Loading WAD textures …');
+      const wadTextures = await loadWadTextures(bsp);
+
       setStatus('Building level geometry …');
-      const level = buildLevel(bsp, { fallbackTextures });
+      const level = buildLevel(bsp, { fallbackTextures, wadTextures });
       scene.add(level.group);
       bounds = level.bounds;
       killZ = bsp.models[0].mins[2] - 512;

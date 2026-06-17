@@ -60,16 +60,25 @@ function embeddedTexture(tex) {
 }
 
 // Unlit base × lightmap, the authentic GoldSrc shading (lightMap uses uv1).
-function materialFor(tex, fallbacks, lightMap) {
+function materialFor(tex, fallbacks, lightMap, wadTex) {
   const masked = tex.masked;
   const common = lightMap ? { lightMap, lightMapIntensity: 2.2 } : {};
+  // 1. texture embedded in the BSP
   if (tex.embedded && tex.rgba) {
     return new THREE.MeshBasicMaterial({
       map: embeddedTexture(tex), transparent: masked, alphaTest: masked ? 0.5 : 0,
       side: THREE.DoubleSide, ...common,
     });
   }
-  const name = tex.name || 'world';
+  const name = (tex.name || 'world').toLowerCase();
+  // 2. real texture pulled from a WAD
+  if (wadTex && wadTex.has(name)) {
+    return new THREE.MeshBasicMaterial({
+      map: wadTex.get(name), transparent: masked, alphaTest: masked ? 0.5 : 0,
+      side: THREE.DoubleSide, ...common,
+    });
+  }
+  // 3. CC0 Kenney fallback, tinted per surface name
   if (fallbacks && fallbacks.length) {
     const map = fallbacks[nameHash(name) % fallbacks.length].clone();
     map.needsUpdate = true;
@@ -99,7 +108,7 @@ function faceLightmap(bsp, face, ti, poly) {
 
 // Build all renderable geometry. `fallbackTextures` is an array of THREE.Texture
 // (the shipped Kenney prototype set) used for the external/WAD surfaces.
-export function buildLevel(bsp, { fallbackTextures = [] } = {}) {
+export function buildLevel(bsp, { fallbackTextures = [], wadTextures = null } = {}) {
   const group = new THREE.Group();
   group.name = 'surf_level';
 
@@ -212,7 +221,7 @@ export function buildLevel(bsp, { fallbackTextures = [] } = {}) {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs, 2));
     if (lightMap) geo.setAttribute('uv1', new THREE.Float32BufferAttribute(bucket.uv1, 2));
     geo.setIndex(bucket.indices);
-    const mesh = new THREE.Mesh(geo, materialFor(bucket.tex, fallbackTextures, lightMap));
+    const mesh = new THREE.Mesh(geo, materialFor(bucket.tex, fallbackTextures, lightMap, wadTextures));
     mesh.frustumCulled = true;
     group.add(mesh);
   }
