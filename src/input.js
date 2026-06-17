@@ -23,6 +23,8 @@ export class Input {
     this.weapon = 'pistol';
     this._onActive = [];
     this._onRespawn = [];
+    this._onReload = [];
+    this._onCheckpoint = [];
   }
 
   attach(canvas) {
@@ -94,6 +96,8 @@ export class Input {
 
   onActiveChange(fn) { this._onActive.push(fn); }
   onRespawn(fn) { this._onRespawn.push(fn); }
+  onReload(fn) { this._onReload.push(fn); }
+  onCheckpoint(fn) { this._onCheckpoint.push(fn); }
   _fireActive() { this._onActive.forEach((f) => f(this.active)); }
 
   _key(e, down) {
@@ -110,7 +114,10 @@ export class Input {
     }
     if (down && code === 'KeyB') this.autohop = !this.autohop;
     if (down && code === 'KeyV') this.noclip = !this.noclip;
-    if (down && code === 'KeyR') this._onRespawn.forEach((f) => f());
+    if (down && code === 'KeyR') this._onReload.forEach((f) => f());
+    if (down && (code === 'KeyU' || code === 'Backspace')) this._onRespawn.forEach((f) => f());
+    if (down && code === 'KeyC') this._onCheckpoint.forEach((f) => f('save'));
+    if (down && code === 'KeyX') this._onCheckpoint.forEach((f) => f('load'));
     if (down && code === 'Digit1') this.weapon = 'pistol';
     if (down && code === 'Digit2') this.weapon = 'rifle';
     if (down && code === 'Digit3') this.weapon = 'shotgun';

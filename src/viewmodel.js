@@ -32,6 +32,7 @@ export class Viewmodel {
     this.current = null;
     this.bobT = 0;
     this.recoil = 0; // 0..1, decays; kicks the gun back + up when firing
+    this.reloadT = 0; this.reloadDur = 0; // reload dip animation
     this._vmEuler = [0, 0, 0]; // fine-tune on top of the baked axis remap
   }
 
@@ -42,6 +43,8 @@ export class Viewmodel {
   }
 
   kick(amount = 0.6) { this.recoil = Math.min(1.4, this.recoil + amount); }
+
+  startReload(dur) { this.reloadDur = dur; this.reloadT = dur; }
 
   // Load real CS 1.6 StudioModel (.mdl) view models.
   async loadMDLWeapons(map) {
@@ -157,10 +160,16 @@ export class Viewmodel {
     this.bobT += dt * (4 + Math.min(speed, 1500) / 180);
     const amp = 0.006 + Math.min(speed, 1500) / 1500 * 0.012;
     this.recoil = Math.max(0, this.recoil - dt * 6);
-    this.rig.position.y = this.baseY + Math.sin(this.bobT) * amp - this.recoil * 0.01;
+    // reload dip: lower + tilt the gun, peaking mid-reload
+    let dip = 0;
+    if (this.reloadT > 0) {
+      this.reloadT = Math.max(0, this.reloadT - dt);
+      dip = Math.sin(Math.PI * (1 - this.reloadT / this.reloadDur));
+    }
+    this.rig.position.y = this.baseY + Math.sin(this.bobT) * amp - this.recoil * 0.01 - dip * 0.14;
     this.rig.position.x = this.baseX + Math.cos(this.bobT * 0.5) * amp * 0.6;
-    this.rig.position.z = -0.46 + this.recoil * 0.05;     // kick toward the camera
-    this.rig.rotation.x = -this.recoil * 0.18;            // muzzle rises
+    this.rig.position.z = -0.46 + this.recoil * 0.05;
+    this.rig.rotation.x = -this.recoil * 0.18 + dip * 0.5;
   }
 
   setAspect(aspect) {

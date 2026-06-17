@@ -114,6 +114,8 @@ let lastT = performance.now() / 1000;
 let runTime = 0;
 let runStarted = false;
 let netAcc = 0; // throttle state broadcasts to ~20 Hz
+let envWater = false, envLadder = false; // last movement environment (for HUD)
+let checkpoint = null; // {origin, yaw} for practice save/load
 
 // ---- Map selection (?map=surf_green) ---------------------------------------
 const MAPS = {
@@ -122,6 +124,22 @@ const MAPS = {
 };
 const mapParam = new URLSearchParams(location.search).get('map');
 const MAP_NAME = MAPS[mapParam] ? mapParam : 'surf_ski_2';
+
+// ---- Persistent settings + personal bests ----------------------------------
+function loadJSON(key, fallback) { try { return Object.assign({}, fallback, JSON.parse(localStorage.getItem(key) || '{}')); } catch { return { ...fallback }; } }
+const SETTINGS = loadJSON('surf_settings', { sens: 2.2, fov: 90, vol: 60, quality: 100 });
+function saveSettings() { try { localStorage.setItem('surf_settings', JSON.stringify(SETTINGS)); } catch { /* ignore */ } }
+const PB_TIME_KEY = `surf_pbtime_${MAP_NAME}`;
+const PB_SPEED_KEY = `surf_pbspeed_${MAP_NAME}`;
+let pbTime = Number(localStorage.getItem(PB_TIME_KEY)) || null;
+let pbSpeed = Number(localStorage.getItem(PB_SPEED_KEY)) || 0;
+
+function applySettings() {
+  if (input) input.sensitivity = SETTINGS.sens / 1000;
+  if (weapons) weapons.masterVol = SETTINGS.vol / 100;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * (SETTINGS.quality / 100));
+  onResize();
+}
 
 function parseSpawn(bsp) {
   const list = bsp.entitiesByClass('info_player_start')
@@ -149,12 +167,37 @@ function settleSpawn(origin) {
 }
 
 function respawn() {
+  // bank the best run time when a real run ends
+  if (runStarted && runTime > 1 && (pbTime == null || runTime > pbTime)) {
+    pbTime = runTime;
+    try { localStorage.setItem(PB_TIME_KEY, String(pbTime)); } catch { /* ignore */ }
+    if (hud) hud.toast(`LONGEST RUN  ${fmtClock(pbTime)}`, '#7fd1ae');
+  }
   state = createPlayerState(settleSpawn(spawn.origin));
   state.velocity = [0, 0, 0];
   if (input) { input.yaw = spawn.yaw; input.pitch = 0; }
   prevOrigin = copy(state.origin);
   runTime = 0; runStarted = false;
   if (hud) hud.peak = 0;
+}
+
+function fmtClock(t) {
+  const m = Math.floor(t / 60), s = Math.floor(t % 60), cs = Math.floor((t * 100) % 100);
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+}
+
+function handleCheckpoint(action) {
+  if (!state) return;
+  if (action === 'save') {
+    checkpoint = { origin: copy(state.origin), yaw: input.yaw };
+    if (hud) hud.toast('Checkpoint saved', '#9be08a');
+  } else if (action === 'load' && checkpoint) {
+    state.origin = copy(checkpoint.origin);
+    state.velocity = [0, 0, 0];
+    input.yaw = checkpoint.yaw;
+    prevOrigin = copy(state.origin);
+    if (hud) hud.toast('Checkpoint loaded', '#9be08a');
+  }
 }
 
 // ---- Fixed-step physics ----------------------------------------------------
@@ -179,6 +222,7 @@ function stepPhysics(dt) {
   // Choose the movement mode based on the volume the player is in.
   const inWater = entities && entities.inWater(state.origin);
   const onLadder = !inWater && entities && entities.onLadder(state.origin);
+  envWater = inWater; envLadder = onLadder;
   if (inWater) {
     waterMove(state, cmd, world, dt);
   } else if (onLadder) {
@@ -221,8 +265,8 @@ function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
   const aspect = w / h;
-  // keep a ~90-degree horizontal FOV regardless of aspect
-  const hfov = (90 * Math.PI) / 180;
+  // keep the chosen horizontal FOV regardless of aspect
+  const hfov = (SETTINGS.fov * Math.PI) / 180;
   camera.fov = (2 * Math.atan(Math.tan(hfov / 2) / aspect) * 180) / Math.PI;
   camera.aspect = aspect;
   camera.updateProjectionMatrix();
@@ -268,14 +312,28 @@ function frame(nowMs) {
       pitch: pitchEff,
     });
   }
+  // track all-time top speed (per map)
+  if (hud.peak > pbSpeed) { pbSpeed = hud.peak; try { localStorage.setItem(PB_SPEED_KEY, String(Math.round(pbSpeed))); } catch { /* ignore */ } }
+
   hud.update({
     speed: sp,
+    dt,
     onground: state.onground,
-    surfing: !state.onground && state.velocity[2] < 0 && sp > 150,
-    time: runTime,
+    inWater: envWater,
+    onLadder: envLadder,
+    surfing: !state.onground && !envWater && !envLadder && state.velocity[2] < 0 && sp > 150,
+    time: runStarted ? runTime : 0,
+    best: pbTime,
+    pbspeed: pbSpeed,
     origin: state.origin,
     autohop: input.autohop,
     noclip: input.noclip,
+    cp: !!checkpoint,
+    players: net ? net.count : 1,
+    health: 100,
+    armor: 100,
+    runstate: runStarted ? 'running' : 'ready',
+    ammo: weapons ? weapons.ammoState() : null,
   });
 
   // multiplayer: interpolate remote avatars + broadcast our state at ~20 Hz
@@ -339,19 +397,24 @@ async function boot() {
 
     input = new Input();
     input.attach(canvas);
+    input.sensitivity = SETTINGS.sens / 1000;
     input.onRespawn(respawn);
+    input.onReload(() => { if (weapons) weapons.reload(); });
+    input.onCheckpoint(handleCheckpoint);
     const overlay = document.getElementById('overlay');
     input.onActiveChange((active) => {
       if (overlay) overlay.style.display = active ? 'none' : 'flex';
       canvas.style.cursor = active ? 'none' : 'crosshair';
+      if (active && weapons) weapons.resume(); // unlock audio on first play gesture
     });
-    // The overlay sits above the canvas, so it must be the click target that
-    // starts play (otherwise clicks never reach the canvas).
-    if (overlay) overlay.addEventListener('click', () => input.start());
-    // Clicking the game surface while playing re-grabs pointer lock if dropped.
+    // Only the Play button (or Enter/any key, or clicking the canvas) starts the
+    // game — so the menu's settings/room controls stay usable.
+    const playbtn = document.getElementById('playbtn');
+    if (playbtn) playbtn.addEventListener('click', () => input.start());
     canvas.addEventListener('click', () => { if (input.active && !input.locked) input.start(); });
 
     hud = new HUD(document);
+    hud.setMap(MAP_NAME);
     respawn();
 
     // First-person weapon viewmodel (CC0 Quaternius guns). Non-blocking:
@@ -375,10 +438,13 @@ async function boot() {
     // Firing: real CS 1.6 weapon sounds + hitscan tracers + recoil.
     weapons = new Weapons(scene, viewmodel);
     weapons.setWorld(world);
+    weapons.masterVol = SETTINGS.vol / 100;
     weapons.loadSounds({
-      pistol: 'assets/sounds/pistol.wav',
-      rifle: 'assets/sounds/rifle.wav',
-      shotgun: 'assets/sounds/shotgun.wav',
+      pistol: 'assets/sounds/pistol.wav', rifle: 'assets/sounds/rifle.wav', shotgun: 'assets/sounds/shotgun.wav',
+      pistol_out: 'assets/sounds/pistol_out.wav', pistol_in: 'assets/sounds/pistol_in.wav', pistol_slide: 'assets/sounds/pistol_slide.wav',
+      rifle_out: 'assets/sounds/rifle_out.wav', rifle_in: 'assets/sounds/rifle_in.wav', rifle_bolt: 'assets/sounds/rifle_bolt.wav',
+      shotgun_pump: 'assets/sounds/shotgun_pump.wav', shotgun_insert: 'assets/sounds/shotgun_insert.wav',
+      empty: 'assets/sounds/empty.wav', draw: 'assets/sounds/draw.wav',
     });
 
     // ---- P2P multiplayer (serverless WebRTC via Trystero) ----
@@ -393,29 +459,50 @@ async function boot() {
     const joinBtn = document.getElementById('mp-join');
     const roomInput = document.getElementById('mp-room');
     const mpStatus = document.getElementById('mp-status');
-    const stop = (e) => e.stopPropagation();
-    [joinBtn, roomInput].forEach((el) => el && el.addEventListener('click', stop));
+    async function connectMP(room) {
+      if (mpStatus) mpStatus.textContent = 'connecting…';
+      try {
+        await net.join(room);
+        if (joinBtn) joinBtn.textContent = 'Leave';
+        if (mpStatus) mpStatus.textContent = `room: ${room}`;
+      } catch (err) {
+        if (joinBtn) joinBtn.textContent = 'Join';
+        if (mpStatus) mpStatus.textContent = `offline (${err.message})`;
+      }
+    }
     if (joinBtn) {
-      joinBtn.addEventListener('click', async () => {
+      joinBtn.addEventListener('click', () => {
         if (net.connected) {
           net.leave(); remotePlayers.clear();
           joinBtn.textContent = 'Join'; if (mpStatus) mpStatus.textContent = 'offline';
-          return;
-        }
-        const room = (roomInput && roomInput.value.trim()) || 'public';
-        if (mpStatus) mpStatus.textContent = 'connecting…';
-        try {
-          await net.join(room);
-          joinBtn.textContent = 'Leave';
-          if (mpStatus) mpStatus.textContent = `room "${room}" · `;
-        } catch (err) {
-          if (mpStatus) mpStatus.textContent = `failed: ${err.message}`;
+        } else {
+          connectMP((roomInput && roomInput.value.trim()) || 'public');
         }
       });
     }
+    // Multiplayer ON by default — auto-join the room as soon as we boot.
+    connectMP((roomInput && roomInput.value.trim()) || 'public');
+
+    // ---- Settings sliders ----
+    function wireSlider(id, key, fmt = (v) => v) {
+      const el = document.getElementById(id), valEl = document.getElementById(`${id}-v`);
+      if (!el) return;
+      el.value = SETTINGS[key];
+      if (valEl) valEl.textContent = fmt(SETTINGS[key]);
+      el.addEventListener('input', () => {
+        SETTINGS[key] = Number(el.value);
+        if (valEl) valEl.textContent = fmt(SETTINGS[key]);
+        saveSettings();
+        applySettings();
+      });
+    }
+    wireSlider('set-sens', 'sens', (v) => Number(v).toFixed(1));
+    wireSlider('set-fov', 'fov');
+    wireSlider('set-vol', 'vol');
+    wireSlider('set-q', 'quality');
 
     window.addEventListener('resize', onResize);
-    onResize();
+    applySettings();
 
     setStatus('');
     document.getElementById('overlay').style.display = 'flex';

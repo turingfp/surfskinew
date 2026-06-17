@@ -3,129 +3,174 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>surf_ski_2 — CS 1.6 surf clone</title>
+<title>surf_ski_2 — CS surf</title>
 <style>
-  :root { --accent:#7fd1ae; --panel:rgba(10,16,22,0.72); }
+  :root { --accent:#7fd1ae; --cs:#ffcf6b; --panel:rgba(10,16,22,0.78); --xgap:6px; --xlen:7px; --xcol:rgba(170,255,220,0.9); }
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; overflow:hidden; background:#0b0f14; color:#e6eef5;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; user-select:none; }
   #view { position:fixed; inset:0; width:100%; height:100%; display:block; cursor:crosshair; }
 
-  /* Crosshair */
-  #crosshair { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
-    width:22px; height:22px; pointer-events:none; z-index:5; }
-  #crosshair::before, #crosshair::after { content:""; position:absolute; background:rgba(180,255,220,0.85);
-    box-shadow:0 0 2px rgba(0,0,0,0.8); }
-  #crosshair::before { left:50%; top:0; width:2px; height:100%; transform:translateX(-50%); }
-  #crosshair::after { top:50%; left:0; height:2px; width:100%; transform:translateY(-50%); }
+  /* Dynamic crosshair (4 bars; gap grows with speed/fire) */
+  #crosshair { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:5; pointer-events:none;
+    width:0; height:0; }
+  #crosshair i { position:absolute; background:var(--xcol); box-shadow:0 0 2px rgba(0,0,0,0.9); }
+  #crosshair .v { width:2px; height:var(--xlen); left:-1px; }
+  #crosshair .h { height:2px; width:var(--xlen); top:-1px; }
+  #crosshair .up { transform:translateY(calc(-1 * (var(--xgap) + var(--xlen)))); }
+  #crosshair .dn { transform:translateY(var(--xgap)); }
+  #crosshair .lf { transform:translateX(calc(-1 * (var(--xgap) + var(--xlen)))); }
+  #crosshair .rt { transform:translateX(var(--xgap)); }
+  #hitmarker { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%) rotate(45deg); z-index:6;
+    width:18px; height:18px; pointer-events:none; opacity:0; }
+  #hitmarker::before,#hitmarker::after{ content:""; position:absolute; background:#fff; }
+  #hitmarker::before{ left:8px; top:0; width:2px; height:18px; }
+  #hitmarker::after{ top:8px; left:0; height:2px; width:18px; }
 
-  /* HUD */
-  #hud { position:fixed; left:14px; bottom:14px; z-index:6; pointer-events:none;
-    display:flex; flex-direction:column; gap:8px; }
-  .speedo { display:flex; align-items:baseline; gap:8px; }
-  #speed { font-size:64px; font-weight:700; line-height:1; color:#fff;
-    text-shadow:0 2px 8px rgba(0,0,0,0.7); font-variant-numeric:tabular-nums; }
-  .ups { font-size:16px; color:var(--accent); letter-spacing:2px; }
-  #speedbar-wrap { width:320px; height:8px; background:rgba(255,255,255,0.12); border-radius:4px; overflow:hidden; }
-  #speedbar { height:100%; width:0%; background:#4f8; transition:width 0.05s linear; }
-  .rows { display:flex; gap:18px; font-size:13px; color:#aebfce; }
-  .rows b { color:#fff; font-weight:600; }
-  #movestate { font-weight:700; letter-spacing:1px; }
-  #movestate.surf { color:#7fe0ff; } #movestate.air { color:#ffd27f; } #movestate.ground { color:#9be08a; }
-  #flags { color:#ffb86b; letter-spacing:1px; }
+  .hud { position:fixed; z-index:6; pointer-events:none; text-shadow:0 2px 6px rgba(0,0,0,0.8); }
 
-  /* Top-right info */
-  #topright { position:fixed; right:14px; top:12px; z-index:6; text-align:right;
-    font-size:13px; color:#aebfce; pointer-events:none; }
-  #topright b { color:#fff; }
+  /* Bottom-left: speed + state (the surf core) */
+  #hud-speed { left:18px; bottom:16px; }
+  #hud-speed .ups { display:flex; align-items:baseline; gap:8px; }
+  #spd { font-size:62px; font-weight:800; line-height:0.9; color:#fff; font-variant-numeric:tabular-nums; }
+  #hud-speed .u { font-size:15px; color:var(--accent); letter-spacing:3px; }
+  #spdbar-w { width:300px; height:7px; background:rgba(255,255,255,0.12); border-radius:4px; overflow:hidden; margin-top:7px; }
+  #spdbar { height:100%; width:0%; background:#4f8; }
+  #hud-speed .row { display:flex; gap:16px; font-size:12px; color:#aebfce; margin-top:7px; }
+  #movestate.surf{color:#7fe0ff;font-weight:700} #movestate.air{color:#ffd27f;font-weight:700} #movestate.ground{color:#9be08a;font-weight:700} #movestate.water{color:#7fd1ff;font-weight:700} #movestate.ladder{color:#d6a4ff;font-weight:700}
+  #flags{color:#ffb86b;letter-spacing:1px}
 
-  /* Click-to-play overlay */
+  /* Bottom-right: ammo + weapon (CS style) */
+  #hud-ammo { right:22px; bottom:16px; text-align:right; }
+  #hud-ammo .wname { font-size:14px; color:var(--accent); letter-spacing:2px; }
+  #hud-ammo .ammo { font-size:46px; font-weight:800; color:var(--cs); font-variant-numeric:tabular-nums; line-height:1; }
+  #hud-ammo .ammo .res { font-size:24px; color:#caa44a; }
+  #hud-ammo .reloading { color:#ff9a6b; font-size:13px; letter-spacing:2px; min-height:1em; }
+
+  /* Bottom-left-of-ammo: health/armor (CS style) */
+  #hud-vitals { left:18px; bottom:128px; display:flex; gap:22px; }
+  #hud-vitals .v { display:flex; align-items:center; gap:7px; }
+  #hud-vitals .ic { font-size:18px; }
+  #hud-vitals b { font-size:28px; color:var(--cs); font-variant-numeric:tabular-nums; }
+
+  /* Top-right: time / pb / players / pos */
+  #hud-tr { right:16px; top:12px; text-align:right; font-size:13px; color:#aebfce; }
+  #hud-tr b { color:#fff; }
+  #hud-tr .pb { color:var(--accent); }
+
+  /* Top-left: map name + run state */
+  #hud-tl { left:16px; top:12px; font-size:13px; color:#aebfce; }
+  #hud-tl b { color:#fff; }
+  #toast { position:fixed; left:50%; top:22%; transform:translateX(-50%); z-index:7; pointer-events:none;
+    font-size:20px; font-weight:700; color:var(--accent); text-shadow:0 2px 8px #000; opacity:0; transition:opacity .2s; }
+
+  /* Overlay menu */
   #overlay { position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
-    background:rgba(6,10,14,0.82); backdrop-filter:blur(3px); }
-  .card { background:var(--panel); border:1px solid rgba(127,209,174,0.3); border-radius:14px;
-    padding:28px 34px; max-width:560px; box-shadow:0 20px 60px rgba(0,0,0,0.5); }
-  .card h1 { margin:0 0 4px; font-size:24px; color:#fff; letter-spacing:1px; }
+    background:rgba(6,10,14,0.84); backdrop-filter:blur(4px); overflow:auto; }
+  .card { background:var(--panel); border:1px solid rgba(127,209,174,0.3); border-radius:16px;
+    padding:26px 32px; max-width:680px; width:calc(100% - 32px); box-shadow:0 24px 70px rgba(0,0,0,0.6); }
+  .card h1 { margin:0; font-size:30px; color:#fff; letter-spacing:1px; }
   .card h1 span { color:var(--accent); }
-  .card .sub { color:#9fb3c4; margin:0 0 18px; font-size:13px; }
-  .keys { display:grid; grid-template-columns:auto 1fr; gap:6px 16px; font-size:13px; }
-  .keys kbd { background:#1c2733; border:1px solid #2f3f4f; border-bottom-width:2px; border-radius:5px;
-    padding:2px 8px; color:#dff; font-family:inherit; }
+  .card .sub { color:#9fb3c4; margin:4px 0 16px; font-size:13px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:620px){ .grid2{ grid-template-columns:1fr; } }
+  .sec h2 { font-size:12px; letter-spacing:3px; color:var(--accent); margin:0 0 10px; text-transform:uppercase; }
+  .keys { display:grid; grid-template-columns:auto 1fr; gap:5px 14px; font-size:13px; }
+  .keys kbd { background:#1c2733; border:1px solid #2f3f4f; border-bottom-width:2px; border-radius:5px; padding:1px 7px; color:#dff; }
   .keys .d { color:#aebfce; align-self:center; }
-  .maps { margin-top:18px; display:flex; align-items:center; gap:10px; }
-  .maps .ml { color:#7f93a4; font-size:12px; letter-spacing:2px; }
-  .mapbtn { text-decoration:none; color:#cfe; background:#16212c; border:1px solid #2f4150;
-    border-radius:6px; padding:5px 12px; font-size:13px; }
-  .mapbtn:hover { border-color:var(--accent); }
-  .mapbtn.active { background:var(--accent); color:#08110c; border-color:var(--accent); font-weight:700; }
-  .mp { margin-top:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .mp .ml { color:#7f93a4; font-size:12px; letter-spacing:2px; }
-  .mp input { background:#0e1620; border:1px solid #2f4150; border-radius:6px; color:#dff;
-    padding:5px 10px; font-family:inherit; font-size:13px; width:130px; }
-  .mp button { background:#16212c; border:1px solid #2f4150; border-radius:6px; color:#cfe;
-    padding:5px 14px; font-size:13px; cursor:pointer; }
-  .mp button:hover { border-color:var(--accent); }
-  .mpstat { color:#7f93a4; font-size:12px; }
-  .play { margin-top:18px; text-align:center; color:var(--accent); font-size:14px; letter-spacing:2px; }
-  #status { margin-top:10px; color:#ffb86b; font-size:12px; min-height:1em; text-align:center; }
-  .tip { margin-top:14px; font-size:12px; color:#7f93a4; line-height:1.5; }
+  .field { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:8px 0; font-size:13px; color:#cfe; }
+  .field input[type=range]{ width:150px; }
+  .field input[type=text]{ width:130px; background:#0e1620; border:1px solid #2f4150; border-radius:6px; color:#dff; padding:5px 9px; font-family:inherit; }
+  .field .val{ color:var(--accent); width:46px; text-align:right; font-variant-numeric:tabular-nums; }
+  .row2 { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .btn { text-decoration:none; color:#cfe; background:#16212c; border:1px solid #2f4150; border-radius:7px; padding:6px 13px; font-size:13px; cursor:pointer; font-family:inherit; }
+  .btn:hover { border-color:var(--accent); }
+  .btn.active { background:var(--accent); color:#08110c; border-color:var(--accent); font-weight:700; }
+  .play { margin-top:20px; text-align:center; }
+  .play button { font-size:16px; letter-spacing:3px; color:#08110c; background:var(--accent); border:0; border-radius:10px;
+    padding:12px 34px; font-weight:800; cursor:pointer; font-family:inherit; }
+  #status { margin-top:8px; color:#ffb86b; font-size:12px; min-height:1em; text-align:center; }
+  .mpstat{ color:#7f93a4; font-size:12px; }
 </style>
 </head>
 <body>
   <canvas id="view"></canvas>
-  <div id="crosshair"></div>
 
-  <div id="hud">
-    <div class="speedo"><span id="speed">0</span><span class="ups">UPS</span></div>
-    <div id="speedbar-wrap"><div id="speedbar"></div></div>
-    <div class="rows">
-      <span>STATE <b id="movestate">GROUND</b></span>
-      <span>PEAK <b id="peak">0</b></span>
-      <span id="flags"></span>
-    </div>
+  <div id="crosshair">
+    <i class="v up"></i><i class="v dn"></i><i class="h lf"></i><i class="h rt"></i>
   </div>
+  <div id="hitmarker"></div>
+  <div id="toast"></div>
 
-  <div id="topright">
+  <div id="hud-tl" class="hud"><b id="mapname">surf_ski_2</b> · <span id="runstate">ready</span></div>
+
+  <div id="hud-tr" class="hud">
     <div>TIME <b id="timer">00:00.00</b></div>
+    <div>BEST <b class="pb" id="best">--:--.--</b></div>
+    <div>PEAK <b id="peak">0</b> · PB <b class="pb" id="pbspeed">0</b></div>
     <div>PLAYERS <b id="peercount">1</b></div>
     <div>POS <b id="pos">0 0 0</b></div>
+  </div>
+
+  <div id="hud-vitals" class="hud">
+    <div class="v"><span class="ic">❤</span><b id="health">100</b></div>
+    <div class="v"><span class="ic">🛡</span><b id="armor">100</b></div>
+  </div>
+
+  <div id="hud-speed" class="hud">
+    <div class="ups"><span id="spd">0</span><span class="u">UPS</span></div>
+    <div id="spdbar-w"><div id="spdbar"></div></div>
+    <div class="row"><span>STATE <span id="movestate">GROUND</span></span><span id="flags"></span></div>
+  </div>
+
+  <div id="hud-ammo" class="hud">
+    <div class="wname" id="wname">USP</div>
+    <div class="ammo"><span id="clip">12</span><span class="res"> / <span id="reserve">120</span></span></div>
+    <div class="reloading" id="reloadmsg"></div>
   </div>
 
   <div id="overlay">
     <div class="card">
       <h1>surf_<span>ski_2</span></h1>
-      <p class="sub">GoldSrc / CS 1.6 surf — authentic pm_shared movement, real BSP collision.</p>
-      <div class="keys">
-        <span><kbd>Mouse</kbd></span><span class="d">Look — sync your turn with a strafe key to gain speed</span>
-        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span class="d">Move / strafe</span>
-        <span><kbd>Space</kbd></span><span class="d">Jump</span>
-        <span><kbd>Shift</kbd>/<kbd>Ctrl</kbd></span><span class="d">Duck</span>
-        <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span class="d">Switch weapon (pistol / rifle / shotgun)</span>
-        <span><kbd>R</kbd></span><span class="d">Respawn</span>
-        <span><kbd>B</kbd></span><span class="d">Toggle auto-bhop</span>
-        <span><kbd>V</kbd></span><span class="d">Toggle noclip (fly to explore)</span>
+      <p class="sub">GoldSrc / CS 1.6 surf — authentic pm_shared movement · real BSP collision · P2P multiplayer.</p>
+      <div class="grid2">
+        <div class="sec">
+          <h2>Controls</h2>
+          <div class="keys">
+            <span><kbd>Mouse</kbd></span><span class="d">Look — sync turn with a strafe key to gain speed</span>
+            <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span class="d">Move / strafe</span>
+            <span><kbd>Space</kbd></span><span class="d">Jump</span>
+            <span><kbd>Shift</kbd></span><span class="d">Duck</span>
+            <span><kbd>LMB</kbd></span><span class="d">Fire</span>
+            <span><kbd>R</kbd></span><span class="d">Reload</span>
+            <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd></span><span class="d">USP / M4A1 / M3</span>
+            <span><kbd>C</kbd> / <kbd>X</kbd></span><span class="d">Save / load checkpoint (practice)</span>
+            <span><kbd>U</kbd></span><span class="d">Restart run</span>
+            <span><kbd>B</kbd> / <kbd>V</kbd></span><span class="d">Auto-bhop / noclip</span>
+          </div>
+          <h2 style="margin-top:16px">Map</h2>
+          <div class="row2">
+            <a class="btn mapbtn" href="?map=surf_ski_2">surf_ski_2</a>
+            <a class="btn mapbtn" href="?map=surf_green">surf_green</a>
+          </div>
+        </div>
+        <div class="sec">
+          <h2>Multiplayer</h2>
+          <div class="field"><span>Room</span><span class="row2"><input id="mp-room" type="text" value="public" maxlength="24" /><button class="btn" id="mp-join" type="button">Leave</button></span></div>
+          <div class="field"><span>Status</span><span class="mpstat" id="mp-status">connecting…</span></div>
+          <h2 style="margin-top:16px">Settings</h2>
+          <div class="field"><span>Sensitivity</span><input id="set-sens" type="range" min="0.5" max="6" step="0.1" /><span class="val" id="set-sens-v">2.2</span></div>
+          <div class="field"><span>FOV</span><input id="set-fov" type="range" min="70" max="120" step="1" /><span class="val" id="set-fov-v">90</span></div>
+          <div class="field"><span>Volume</span><input id="set-vol" type="range" min="0" max="100" step="1" /><span class="val" id="set-vol-v">60</span></div>
+          <div class="field"><span>Quality</span><input id="set-q" type="range" min="50" max="100" step="5" /><span class="val" id="set-q-v">100</span></div>
+        </div>
       </div>
-      <div class="maps">
-        <span class="ml">MAP</span>
-        <a class="mapbtn" href="?map=surf_ski_2">surf_ski_2</a>
-        <a class="mapbtn" href="?map=surf_green">surf_green</a>
-      </div>
-      <div class="mp">
-        <span class="ml">MULTIPLAYER</span>
-        <input id="mp-room" type="text" placeholder="room name" value="public" maxlength="24" />
-        <button id="mp-join" type="button">Join</button>
-        <span id="mp-status" class="mpstat">offline</span>
-      </div>
-      <p class="play">▶ CLICK or PRESS ENTER to play</p>
+      <div class="play"><button id="playbtn" type="button">▶ CLICK or PRESS ENTER TO PLAY</button></div>
       <div id="status"></div>
-      <p class="tip">Surf: ride the steep ramps. Hold one strafe key (A or D) and rotate the
-      mouse the same way in sync — keep your aim just off your velocity and you accelerate.</p>
     </div>
   </div>
 
-  <!-- Map the bare "three" specifier (used by the vendored GLTFLoader) to our
-       local Three.js build, so the weapon viewmodel loader needs no CDN. -->
   <script>
-    // Highlight the active map button from the ?map= query.
     (function () {
       var m = new URLSearchParams(location.search).get('map') || 'surf_ski_2';
       document.addEventListener('DOMContentLoaded', function () {

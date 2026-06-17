@@ -31,11 +31,20 @@ npm start          # serves on http://localhost:8000
 | **Mouse** | Look. Sync your turn with a strafe key to gain speed. |
 | **W A S D** | Move / strafe |
 | **Space** | Jump |
-| **Shift / Ctrl** | Duck |
-| **1 / 2 / 3** | Switch weapon (pistol / rifle / shotgun) |
-| **R** | Respawn |
+| **Shift** | Duck |
+| **LMB** | Fire |
+| **R** | Reload |
+| **1 / 2 / 3** | USP / M4A1 / M3 |
+| **C / X** | Save / load checkpoint (practice) |
+| **U** | Restart run |
 | **B** | Toggle auto-bunnyhop |
 | **V** | Toggle noclip (fly to explore the map) |
+
+**Multiplayer is on by default** — you auto-join the `public` room (serverless
+WebRTC). Change the room name in the menu to play with friends privately; the
+HUD shows the live player count. Settings (sensitivity, FOV, volume, quality)
+are in the menu and persist locally, as do your per-map best run time and top
+speed.
 
 **How to surf:** ride the steep ramps. Hold one strafe key (A *or* D) and rotate
 the mouse the *same* direction in sync, keeping your aim just off your velocity
