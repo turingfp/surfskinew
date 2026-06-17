@@ -421,7 +421,8 @@ async function boot() {
     // if it fails to load, the game still runs without a weapon.
     viewmodel = new Viewmodel();
     viewmodel.loadMDLWeapons({
-      pistol: 'assets/models/cs/v_usp.mdl',
+      // USP is one-handed: skip the unused floating "lhand" bodypart.
+      pistol: { url: 'assets/models/cs/v_usp.mdl', skip: ['lhand'] },
       rifle: 'assets/models/cs/v_m4a1.mdl',
       shotgun: 'assets/models/cs/v_m3.mdl',
     }).then(async (names) => {

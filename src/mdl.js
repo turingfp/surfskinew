@@ -57,12 +57,14 @@ const xformDir = (m, v) => [
   m[8] * v[0] + m[9] * v[1] + m[10] * v[2],
 ];
 
-export function parseMDL(arrayBuffer) {
+export function parseMDL(arrayBuffer, opts = {}) {
+  const skip = new Set(opts.skipBodyparts || []);
   const dv = new DataView(arrayBuffer);
   const i32 = (o) => dv.getInt32(o, true);
   const f32 = (o) => dv.getFloat32(o, true);
   const u8 = (o) => dv.getUint8(o);
   const i16 = (o) => dv.getInt16(o, true);
+  const str = (o, n) => { let s = ''; for (let i = 0; i < n; i++) { const c = u8(o + i); if (!c) break; s += String.fromCharCode(c); } return s; };
 
   if (dv.getUint32(0, true) !== 0x54534449) throw new Error('not an IDST mdl'); // "IDST"
 
@@ -112,6 +114,7 @@ export function parseMDL(arrayBuffer) {
 
   for (let bp = 0; bp < numbodyparts; bp++) {
     const o = bodypartindex + bp * 76;
+    if (skip.has(str(o, 64).toLowerCase())) continue; // e.g. skip the unused "lhand"
     const modelindex = i32(o + 72);
     // use base submodel (index 0)
     const mo = modelindex;
@@ -191,8 +194,8 @@ export function parseMDL(arrayBuffer) {
   return { groups, textures, min, max };
 }
 
-export async function loadMDL(url) {
+export async function loadMDL(url, opts = {}) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`load ${url}: ${res.status}`);
-  return parseMDL(await res.arrayBuffer());
+  return parseMDL(await res.arrayBuffer(), opts);
 }

@@ -48,9 +48,11 @@ export class Viewmodel {
 
   // Load real CS 1.6 StudioModel (.mdl) view models.
   async loadMDLWeapons(map) {
-    for (const [name, url] of Object.entries(map)) {
+    for (const [name, def] of Object.entries(map)) {
+      const url = typeof def === 'string' ? def : def.url;
+      const skipBodyparts = (typeof def === 'object' && def.skip) ? def.skip : [];
       try {
-        const data = await loadMDL(url);
+        const data = await loadMDL(url, { skipBodyparts });
         const weapon = this._makeMDLWeapon(data);
         weapon.visible = false;
         this.rig.add(weapon);
