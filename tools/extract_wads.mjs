@@ -75,20 +75,39 @@ for (const f of readdirSync(join(ROOT, 'assets', 'maps'))) {
   }
 }
 
+// strip animated/random/special prefixes (+0 +a -0 -1 { ! ~) -> base name
+const norm = (s) => s.replace(/^[+\-]\w/, '').replace(/^[{!~]/, '');
+
+// index of WAD entries by normalised base name for fuzzy matching
+const wadIndex = []; // {base, name, w, e}
+for (const w of wads) for (const [name, e] of w) wadIndex.push({ base: norm(name), name, w, e });
+
+function findEntry(nm) {
+  for (const w of wads) { const e = w.get(nm); if (e) return e; }       // 1. exact
+  const base = norm(nm);
+  for (const it of wadIndex) if (it.base === base) return it.e;          // 2. ignore prefix
+  const trimmed = base.replace(/[a-z]$/, '');                            // 3. drop trailing variant letter
+  if (trimmed !== base) for (const it of wadIndex) if (it.base === trimmed) return it.e;
+  // 4. longest common-prefix fuzzy (>= 6 chars), pick the best
+  let best = null, bestLen = 5;
+  for (const it of wadIndex) {
+    let k = 0; const a = it.base, b = base; while (k < a.length && k < b.length && a[k] === b[k]) k++;
+    if (k > bestLen) { bestLen = k; best = it.e; }
+  }
+  return best;
+}
+
 mkdirSync(OUT, { recursive: true });
 const manifest = [];
 let bytes = 0;
 for (const nm of need) {
-  for (const w of wads) {
-    const e = w.get(nm);
-    if (!e) continue;
-    const mip = decodeMip(e.dv, e.filepos);
-    if (!mip) continue;
-    const buf = png(mip.w, mip.h, mip.rgba);
-    writeFileSync(join(OUT, `${nm}.png`), buf);
-    manifest.push(nm); bytes += buf.length;
-    break;
-  }
+  const e = findEntry(nm);
+  if (!e) continue;
+  const mip = decodeMip(e.dv, e.filepos);
+  if (!mip) continue;
+  const buf = png(mip.w, mip.h, mip.rgba);
+  writeFileSync(join(OUT, `${nm}.png`), buf);
+  manifest.push(nm); bytes += buf.length;
 }
 writeFileSync(join(OUT, 'manifest.json'), JSON.stringify(manifest));
 console.log(`extracted ${manifest.length}/${need.size} needed textures, ${(bytes / 1024 / 1024).toFixed(1)} MB`);
