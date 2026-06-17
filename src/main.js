@@ -309,13 +309,18 @@ function stepPhysics(dt) {
 
   // Choose the movement mode based on the volume the player is in. Water is
   // detected via the BSP node tree (CONTENTS_WATER) which is reliable.
-  // worldspawn CONTENTS_WATER, else inside a func_water brush's AABB
+  // Underwater = the player point is actually inside a water brush (its node
+  // tree reads WATER or SOLID), not merely inside its bounding box. This stops
+  // tall/oversized func_water AABBs (e.g. surf_ski_2's centre box) from
+  // false-triggering and slowing surfers flying through empty space.
   let inWater = world.pointWaterContents && world.pointWaterContents(state.origin) === CONTENTS.WATER;
-  if (!inWater && entities) {
+  if (!inWater && entities && world.modelContents) {
     const p = state.origin;
-    for (const w of entities.waters) {
-      const b = w.box;
-      if (p[0] >= b.min[0] && p[0] <= b.max[0] && p[1] >= b.min[1] && p[1] <= b.max[1] && p[2] >= b.min[2] && p[2] <= b.max[2]) { inWater = true; break; }
+    for (const wv of entities.waters) {
+      const b = wv.box;
+      if (p[0] < b.min[0] || p[0] > b.max[0] || p[1] < b.min[1] || p[1] > b.max[1] || p[2] < b.min[2] || p[2] > b.max[2]) continue;
+      const c = world.modelContents(p, wv.mi);
+      if (c === CONTENTS.WATER || c === CONTENTS.SOLID) { inWater = true; break; }
     }
   }
   const onLadder = !inWater && entities && entities.onLadder(state.origin);
