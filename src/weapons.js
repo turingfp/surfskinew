@@ -22,7 +22,7 @@ export const WEAPON_LIST = ['usp', 'glock', 'deagle', 'mp5', 'tmp', 'mac10', 'p9
 
 const SPECS = {
   // pistols (one-handed, semi)
-  usp: spec({ label: 'USP', sound: 'pistol', rate: 0.15, auto: false, kick: 0.6, spread: 0.006, dmg: 24, clip: 12, reserve: 120, reload: 2.2, rld: 'pistol', tracer: 0xbfe0ff }),
+  usp: spec({ label: 'USP', sound: 'usp', rate: 0.15, auto: false, kick: 0.6, spread: 0.006, dmg: 24, clip: 12, reserve: 120, reload: 2.2, rld: 'pistol', tracer: 0xbfe0ff }),
   glock: spec({ label: 'GLOCK', sound: 'glock', rate: 0.13, auto: false, kick: 0.5, spread: 0.007, dmg: 18, clip: 20, reserve: 120, reload: 2.2, rld: 'pistol', tracer: 0xbfe0ff }),
   deagle: spec({ label: 'DEAGLE', sound: 'deagle', rate: 0.25, auto: false, kick: 0.95, spread: 0.008, dmg: 54, clip: 7, reserve: 35, reload: 2.2, rld: 'deagle', tracer: 0xffe0b0 }),
   // smgs (auto)
@@ -32,7 +32,7 @@ const SPECS = {
   p90: spec({ label: 'P90', sound: 'p90', rate: 0.07, auto: true, kick: 0.4, spread: 0.024, dmg: 22, clip: 50, reserve: 100, reload: 3.3, rld: 'rifle' }),
   // rifles (auto)
   ak47: spec({ label: 'AK47', sound: 'ak47', rate: 0.1, auto: true, kick: 0.7, spread: 0.03, dmg: 33, clip: 30, reserve: 90, reload: 2.5, rld: 'ak', tracer: 0xffd27f }),
-  m4a1: spec({ label: 'M4A1', sound: 'rifle', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, dmg: 28, clip: 30, reserve: 90, reload: 3.0, rld: 'rifle' }),
+  m4a1: spec({ label: 'M4A1', sound: 'm4a1', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, dmg: 28, clip: 30, reserve: 90, reload: 3.0, rld: 'rifle' }),
   sg552: spec({ label: 'SG552', sound: 'sg552', rate: 0.09, auto: true, kick: 0.6, spread: 0.025, dmg: 30, clip: 30, reserve: 90, reload: 3.0, rld: 'rifle' }),
   aug: spec({ label: 'AUG', sound: 'aug', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, dmg: 28, clip: 30, reserve: 90, reload: 3.3, rld: 'rifle' }),
   // snipers (semi)
@@ -40,7 +40,7 @@ const SPECS = {
   awp: spec({ label: 'AWP', sound: 'awp', rate: 1.5, auto: false, kick: 1.5, spread: 0.001, dmg: 115, clip: 10, reserve: 30, reload: 3.0, rld: 'sniper', tracer: 0x9fd0ff }),
   g3sg1: spec({ label: 'G3SG1', sound: 'g3sg1', rate: 0.25, auto: false, kick: 0.9, spread: 0.01, dmg: 40, clip: 20, reserve: 90, reload: 3.5, rld: 'sniper', tracer: 0x9fd0ff }),
   // shotguns (pellets)
-  m3: spec({ label: 'M3', sound: 'shotgun', rate: 0.8, auto: false, kick: 1.1, spread: 0.07, pellets: 8, dmg: 11, clip: 8, reserve: 32, reload: 2.6, rld: 'shotgun', tracer: 0xffd890 }),
+  m3: spec({ label: 'M3', sound: 'm3', rate: 0.8, auto: false, kick: 1.1, spread: 0.07, pellets: 8, dmg: 11, clip: 8, reserve: 32, reload: 2.6, rld: 'shotgun', tracer: 0xffd890 }),
   xm1014: spec({ label: 'XM1014', sound: 'xm1014', rate: 0.3, auto: false, kick: 0.9, spread: 0.08, pellets: 8, dmg: 9, clip: 7, reserve: 32, reload: 3.2, rld: 'shotgun', tracer: 0xffd890 }),
   // lmg (auto)
   m249: spec({ label: 'M249', sound: 'm249', rate: 0.08, auto: true, kick: 0.6, spread: 0.03, dmg: 32, clip: 100, reserve: 100, reload: 4.5, rld: 'rifle' }),

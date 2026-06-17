@@ -89,6 +89,14 @@
   #killfeed { position:fixed; right:14px; top:120px; z-index:7; pointer-events:none; display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
   #killfeed .kf { background:rgba(10,16,22,0.6); border-radius:5px; padding:3px 9px; font-size:13px; color:#dfe9f2; }
   #killfeed .kf b { color:var(--cs); }
+  /* pickup prompt + underwater tint */
+  #usePrompt { position:fixed; left:50%; top:58%; transform:translateX(-50%); z-index:7; display:none;
+    pointer-events:none; color:#fff; font-size:15px; letter-spacing:1px; text-shadow:0 2px 6px #000;
+    background:rgba(10,16,22,0.5); padding:5px 12px; border-radius:6px; border:1px solid rgba(127,209,174,0.4); }
+  #usePrompt::first-letter{ color:var(--accent); }
+  #underwater { position:fixed; inset:0; z-index:4; display:none; pointer-events:none;
+    background:rgba(40,110,150,0.32); box-shadow:inset 0 0 220px rgba(0,30,60,0.6); }
+  .mpnote { color:#8aa0b2; font-size:11px; line-height:1.4; margin:6px 0 0; }
 
   /* Touch controls */
   #touch { position:fixed; inset:0; z-index:7; display:none; pointer-events:none; }
@@ -138,6 +146,8 @@
   </div>
   <div id="hitmarker"></div>
   <div id="toast"></div>
+  <div id="usePrompt"></div>
+  <div id="underwater"></div>
 
   <div id="scoreboard">
     <div class="sb-title">RACE — <span id="sb-map">surf_ski_2</span></div>
@@ -201,9 +211,10 @@
             <span><kbd>LMB</kbd></span><span class="d">Fire</span>
             <span><kbd>R</kbd></span><span class="d">Reload</span>
             <span><kbd>1</kbd>..<kbd>6</kbd></span><span class="d">USP · Deagle · M4A1 · AK47 · AWP · M3</span>
-            <span><kbd>C</kbd> / <kbd>X</kbd></span><span class="d">Save / load checkpoint (practice)</span>
+            <span><kbd>E</kbd></span><span class="d">Pick up weapon you're looking at</span>
             <span><kbd>U</kbd></span><span class="d">Restart run</span>
-            <span><kbd>B</kbd> / <kbd>V</kbd></span><span class="d">Auto-bhop / noclip</span>
+            <span><kbd>B</kbd></span><span class="d">Auto-bhop</span>
+            <span><kbd>V</kbd> · <kbd>C</kbd>/<kbd>X</kbd></span><span class="d">noclip · save/load checkpoint (custom room only)</span>
           </div>
           <h2 style="margin-top:16px">Map</h2>
           <div class="row2">
@@ -221,6 +232,7 @@
           <div class="field"><span>Name</span><input id="mp-name" type="text" maxlength="16" placeholder="Surfer" /></div>
           <div class="field"><span>Room</span><span class="row2"><input id="mp-room" type="text" value="public" maxlength="24" /><button class="btn" id="mp-join" type="button">Leave</button></span></div>
           <div class="field"><span>Status</span><span class="mpstat" id="mp-status">connecting…</span></div>
+          <p class="mpnote" id="mp-note">public match: no noclip / teleport (fair play). rename the room to start your own match where everything is enabled.</p>
           <h2 style="margin-top:16px">Settings</h2>
           <div class="field"><span>Sensitivity</span><input id="set-sens" type="range" min="0.5" max="6" step="0.1" /><span class="val" id="set-sens-v">2.2</span></div>
           <div class="field"><span>FOV</span><input id="set-fov" type="range" min="70" max="120" step="1" /><span class="val" id="set-fov-v">90</span></div>

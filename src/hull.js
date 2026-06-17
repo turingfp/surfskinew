@@ -120,6 +120,15 @@ export class CollisionWorld {
     return this.leafContents[-num - 1] !== undefined ? this.leafContents[-num - 1] : CONTENTS.EMPTY;
   }
 
+  // Leaf contents at a point in a model's node tree (CONTENTS_WATER etc.).
+  modelContents(p, modelIndex = 0) {
+    if (!this.nodes) return CONTENTS.EMPTY;
+    const m = this.models[modelIndex];
+    if (!m || m.headnode[0] == null) return CONTENTS.EMPTY;
+    return this._nodeContents(m.headnode[0], p);
+  }
+  pointWaterContents(p) { return this.modelContents(p, 0); }
+
   // Sweep a POINT against worldspawn + solid brush models (for bullet decals so
   // impacts land exactly on the surface, not a hull-width in front of it).
   traceBullet(start, end) {

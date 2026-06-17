@@ -20,6 +20,7 @@ export class Input {
     this.locked = false;       // pointer lock is actually held
     this.autohop = false;
     this.noclip = false;
+    this.cheats = false; // noclip + checkpoint teleport only in a custom room
     this.scoreboard = false;
     this.weapon = 'usp';
     // touch state
@@ -32,6 +33,7 @@ export class Input {
     this._onRespawn = [];
     this._onReload = [];
     this._onCheckpoint = [];
+    this._onUse = [];
   }
 
   attach(canvas) {
@@ -170,6 +172,9 @@ export class Input {
   onRespawn(fn) { this._onRespawn.push(fn); }
   onReload(fn) { this._onReload.push(fn); }
   onCheckpoint(fn) { this._onCheckpoint.push(fn); }
+  onUse(fn) { this._onUse.push(fn); }
+  onBlocked(fn) { this._onBlocked = fn; }
+  setCheats(on) { this.cheats = on; if (!on) this.noclip = false; }
   _fireActive() { this._onActive.forEach((f) => f(this.active)); }
 
   _key(e, down) {
@@ -186,11 +191,12 @@ export class Input {
       if (code === 'Enter' || code === 'Space') { e.preventDefault(); return; }
     }
     if (down && code === 'KeyB') this.autohop = !this.autohop;
-    if (down && code === 'KeyV') this.noclip = !this.noclip;
+    if (down && code === 'KeyV') { if (this.cheats) this.noclip = !this.noclip; else this._onBlocked?.('noclip'); }
     if (down && code === 'KeyR') this._onReload.forEach((f) => f());
+    if (down && code === 'KeyE') this._onUse.forEach((f) => f());
     if (down && (code === 'KeyU' || code === 'Backspace')) this._onRespawn.forEach((f) => f());
-    if (down && code === 'KeyC') this._onCheckpoint.forEach((f) => f('save'));
-    if (down && code === 'KeyX') this._onCheckpoint.forEach((f) => f('load'));
+    if (down && code === 'KeyC' && this.cheats) this._onCheckpoint.forEach((f) => f('save'));
+    if (down && code === 'KeyX') { if (this.cheats) this._onCheckpoint.forEach((f) => f('load')); else this._onBlocked?.('teleport'); }
     const wk = { Digit1: 'usp', Digit2: 'deagle', Digit3: 'm4a1', Digit4: 'ak47', Digit5: 'awp', Digit6: 'm3' };
     if (down && wk[code]) this.weapon = wk[code];
     this.keys[code] = down;

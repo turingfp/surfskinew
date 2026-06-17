@@ -307,8 +307,17 @@ function stepPhysics(dt) {
 
   const cmd = input.command();
 
-  // Choose the movement mode based on the volume the player is in.
-  const inWater = entities && entities.inWater(state.origin);
+  // Choose the movement mode based on the volume the player is in. Water is
+  // detected via the BSP node tree (CONTENTS_WATER) which is reliable.
+  // worldspawn CONTENTS_WATER, else inside a func_water brush's AABB
+  let inWater = world.pointWaterContents && world.pointWaterContents(state.origin) === CONTENTS.WATER;
+  if (!inWater && entities) {
+    const p = state.origin;
+    for (const w of entities.waters) {
+      const b = w.box;
+      if (p[0] >= b.min[0] && p[0] <= b.max[0] && p[1] >= b.min[1] && p[1] <= b.max[1] && p[2] >= b.min[2] && p[2] <= b.max[2]) { inWater = true; break; }
+    }
+  }
   const onLadder = !inWater && entities && entities.onLadder(state.origin);
   envWater = inWater; envLadder = onLadder;
   if (inWater) {
@@ -402,14 +411,19 @@ function frame(nowMs) {
   updateCamera(ro, pitchEff);
 
   const sp = speed2d(state);
+  // underwater screen tint
+  { const uw = document.getElementById('underwater'); if (uw) uw.style.display = envWater ? 'block' : 'none'; }
+  const viewZ = state.ducking ? HULL.DUCK.viewZ : HULL.STAND.viewZ;
+  const eyeGS = [ro[0], ro[1], ro[2] + viewZ];
+  const dirGS = angleVectors(pitchEff, input.yaw).forward;
+  updatePickups(dt, eyeGS, dirGS);
 
   // firing
   if (weapons) {
     weapons.setWeapon(input.weapon);
-    const viewZ = state.ducking ? HULL.DUCK.viewZ : HULL.STAND.viewZ;
     weapons.update(dt, {
       attack: !!input.attack && input.active,
-      eyeGS: [ro[0], ro[1], ro[2] + viewZ],
+      eyeGS,
       yaw: input.yaw,
       pitch: pitchEff,
     });
@@ -441,8 +455,6 @@ function frame(nowMs) {
     runstate: runStarted ? 'running' : 'ready',
     ammo: weapons ? weapons.ammoState() : null,
   });
-
-  updatePickups(dt);
 
   // multiplayer: interpolate remote avatars + broadcast our state at ~20 Hz
   if (remotePlayers) remotePlayers.render();
@@ -509,8 +521,8 @@ async function buildPickups() {
     const tmpl = pickupModelCache.get(p.weaponId);
     const mesh = tmpl ? tmpl.clone(true)
       : new THREE.Mesh(new THREE.BoxGeometry(20, 8, 28), new THREE.MeshLambertMaterial({ color: 0xffcf6b }));
-    mesh.scale.setScalar(1.6);
-    const o = [p.origin[0], p.origin[1], p.origin[2] + 20];
+    mesh.scale.setScalar(1.4);
+    const o = [p.origin[0], p.origin[1], p.origin[2] + 6];
     const [x, y, z] = gs2three(o[0], o[1], o[2]);
     mesh.position.set(x, y, z);
     scene.add(mesh);
@@ -519,23 +531,41 @@ async function buildPickups() {
   console.log(`[surf] weapon pickups: ${pickups.length}`);
 }
 
-function updatePickups(dt) {
+let targetedPickup = null; // the pickup the player is currently aiming at (in range)
+
+// Spin/bob pickups and pick the one the player is looking at (for the [E] prompt).
+function updatePickups(dt, eyeGS, dirGS) {
+  targetedPickup = null;
   if (!pickups.length) return;
   const now = performance.now() / 1000;
-  const px = state.origin;
+  let bestDot = 0.9; // require aiming within ~25 deg
   for (const p of pickups) {
     if (p.taken) { if (now >= p.respawnAt) { p.taken = false; p.mesh.visible = true; } continue; }
     p.mesh.rotation.y += dt * 1.6;
-    p.mesh.position.y = p.baseY + Math.sin(now * 2 + p.origin[0] * 0.01) * 4;
-    const dx = px[0] - p.origin[0], dy = px[1] - p.origin[1], dz = px[2] - p.origin[2];
-    if (dx * dx + dy * dy + dz * dz < 60 * 60 && weapons) {
-      weapons.give(p.weaponId);
-      ensureViewmodel(p.weaponId);
-      if (input) input.weapon = p.weaponId;
-      if (hud) hud.toast(`picked up ${p.weaponId.toUpperCase()}`, '#ffd166');
-      p.taken = true; p.mesh.visible = false; p.respawnAt = now + 12;
-    }
+    p.mesh.position.y = p.baseY + Math.sin(now * 2 + p.origin[0] * 0.01) * 3;
+    // is the player looking at this pickup, and close enough?
+    const dx = p.origin[0] - eyeGS[0], dy = p.origin[1] - eyeGS[1], dz = p.origin[2] - eyeGS[2];
+    const d = Math.hypot(dx, dy, dz);
+    if (d > 200) continue;
+    const dot = (dx * dirGS[0] + dy * dirGS[1] + dz * dirGS[2]) / (d || 1);
+    if (dot > bestDot) { bestDot = dot; targetedPickup = p; }
   }
+  // update the prompt
+  const el = document.getElementById('usePrompt');
+  if (el) {
+    if (targetedPickup) { el.textContent = `[ E ]  pick up  ${targetedPickup.weaponId.toUpperCase()}`; el.style.display = 'block'; }
+    else el.style.display = 'none';
+  }
+}
+
+function pickUpTargeted() {
+  const p = targetedPickup;
+  if (!p || p.taken || !weapons) return;
+  weapons.give(p.weaponId);
+  ensureViewmodel(p.weaponId);
+  if (input) input.weapon = p.weaponId;
+  if (hud) hud.toast(`picked up ${p.weaponId.toUpperCase()}`, '#ffd166');
+  p.taken = true; p.mesh.visible = false; p.respawnAt = performance.now() / 1000 + 12;
 }
 
 // ---- Boot ------------------------------------------------------------------
@@ -596,6 +626,8 @@ async function boot() {
     input.onRespawn(respawn);
     input.onReload(() => { if (weapons) weapons.reload(); });
     input.onCheckpoint(handleCheckpoint);
+    input.onUse(pickUpTargeted);
+    input.onBlocked((what) => { if (hud) hud.toast(`${what} is off in the public match — start your own room to enable it`, '#ffb86b'); });
     const overlay = document.getElementById('overlay');
     input.onActiveChange((active) => {
       if (overlay) overlay.style.display = active ? 'none' : 'flex';
@@ -648,7 +680,7 @@ async function boot() {
       if (hud) hud.hitMarker();
     };
     weapons.loadSounds({
-      pistol: 'assets/sounds/pistol.wav', rifle: 'assets/sounds/rifle.wav', shotgun: 'assets/sounds/shotgun.wav',
+      usp: 'assets/sounds/usp.wav', m4a1: 'assets/sounds/m4a1.wav', m3: 'assets/sounds/m3.wav',
       deagle: 'assets/sounds/deagle.wav', ak47: 'assets/sounds/ak47.wav', awp: 'assets/sounds/awp.wav',
       glock: 'assets/sounds/glock.wav', mp5: 'assets/sounds/mp5.wav', tmp: 'assets/sounds/tmp.wav',
       mac10: 'assets/sounds/mac10.wav', p90: 'assets/sounds/p90.wav', sg552: 'assets/sounds/sg552.wav',
@@ -680,8 +712,19 @@ async function boot() {
     const joinBtn = document.getElementById('mp-join');
     const roomInput = document.getElementById('mp-room');
     const mpStatus = document.getElementById('mp-status');
+    // Fair-play: noclip + checkpoint teleport are disabled in the shared public
+    // room; renaming the room to your own match enables everything.
+    function applyRoomRules(room) {
+      const custom = room && room !== 'public';
+      if (input) input.setCheats(custom);
+      const note = document.getElementById('mp-note');
+      if (note) note.textContent = custom
+        ? 'custom match: noclip + checkpoints enabled.'
+        : 'public match: no noclip / teleport (fair play). rename the room to start your own match where everything is enabled.';
+    }
     async function connectMP(room) {
       if (mpStatus) mpStatus.textContent = 'connecting…';
+      applyRoomRules(room);
       try {
         await net.join(room);
         if (joinBtn) joinBtn.textContent = 'Leave';
@@ -696,6 +739,7 @@ async function boot() {
         if (net.connected) {
           net.leave(); remotePlayers.clear();
           joinBtn.textContent = 'Join'; if (mpStatus) mpStatus.textContent = 'offline';
+          applyRoomRules((roomInput && roomInput.value.trim()) || 'public');
         } else {
           connectMP((roomInput && roomInput.value.trim()) || 'public');
         }

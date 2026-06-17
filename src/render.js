@@ -63,29 +63,25 @@ function embeddedTexture(tex) {
 function materialFor(tex, fallbacks, lightMap, wadTex) {
   const masked = tex.masked;
   const common = lightMap ? { lightMap, lightMapIntensity: 2.2 } : {};
-  // 1. texture embedded in the BSP
-  if (tex.embedded && tex.rgba) {
-    return new THREE.MeshBasicMaterial({
-      map: embeddedTexture(tex), transparent: masked, alphaTest: masked ? 0.5 : 0,
-      side: THREE.DoubleSide, ...common,
-    });
-  }
   const name = (tex.name || 'world').toLowerCase();
-  // 2. real texture pulled from a WAD
-  if (wadTex && wadTex.has(name)) {
-    return new THREE.MeshBasicMaterial({
-      map: wadTex.get(name), transparent: masked, alphaTest: masked ? 0.5 : 0,
-      side: THREE.DoubleSide, ...common,
-    });
-  }
-  // 3. CC0 Kenney fallback, tinted per surface name
-  if (fallbacks && fallbacks.length) {
+  let mat;
+  if (tex.embedded && tex.rgba) { // 1. embedded in the BSP
+    mat = new THREE.MeshBasicMaterial({ map: embeddedTexture(tex), transparent: masked, alphaTest: masked ? 0.5 : 0, side: THREE.DoubleSide, ...common });
+  } else if (wadTex && wadTex.has(name)) { // 2. from a WAD
+    mat = new THREE.MeshBasicMaterial({ map: wadTex.get(name), transparent: masked, alphaTest: masked ? 0.5 : 0, side: THREE.DoubleSide, ...common });
+  } else if (fallbacks && fallbacks.length) { // 3. CC0 Kenney fallback
     const map = fallbacks[nameHash(name) % fallbacks.length].clone();
     map.needsUpdate = true;
-    const tint = nameColor(name).lerp(new THREE.Color(0xffffff), 0.7);
-    return new THREE.MeshBasicMaterial({ map, color: tint, side: THREE.DoubleSide, ...common });
+    mat = new THREE.MeshBasicMaterial({ map, color: nameColor(name).lerp(new THREE.Color(0xffffff), 0.7), side: THREE.DoubleSide, ...common });
+  } else {
+    mat = new THREE.MeshBasicMaterial({ color: nameColor(name), side: THREE.DoubleSide, ...common });
   }
-  return new THREE.MeshBasicMaterial({ color: nameColor(name), side: THREE.DoubleSide, ...common });
+  // Water surfaces ('!' textures): translucent, single-sided, no depth write so
+  // they don't z-fight / flash when the camera is inside the water.
+  if (name.startsWith('!') || name.includes('water')) {
+    mat.transparent = true; mat.opacity = 0.7; mat.depthWrite = false; mat.side = THREE.FrontSide;
+  }
+  return mat;
 }
 
 // Compute a face's lightmap size + texture-space mins from its texinfo + verts.
