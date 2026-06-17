@@ -82,19 +82,49 @@ const norm = (s) => s.replace(/^[+\-]\w/, '').replace(/^[{!~]/, '');
 const wadIndex = []; // {base, name, w, e}
 for (const w of wads) for (const [name, e] of w) wadIndex.push({ base: norm(name), name, w, e });
 
+// category -> WAD-name search terms, used to pick a "good enough" real texture
+// when there's no exact/fuzzy match (so we never show a flat placeholder).
+const CATEGORY = [
+  [/(^!)|water|wave|liquid/, ['water', 'wave', 'blue']],
+  [/ladder|grate|bars|rail|fence|vent|grid|grill/, ['ladder', 'grate', 'bars', 'fence', 'grid']],
+  [/glass|window|mirror/, ['glass', 'window']],
+  [/crate|box|crat|barrel/, ['crate', 'box', 'barrel']],
+  [/door|gate|hatch/, ['door', 'gate']],
+  [/floor|flr|_f0|grnd|ground|sand|dirt|grass|carpet/, ['floor', 'flr', 'ground', 'grnd', 'sand']],
+  [/button|btn|switch|panel/, ['button', 'switch', 'panel']],
+  [/metal|mtl|vat|tank|pipe|duct|steel|vent/, ['metal', 'mtl', 'pipe', 'vent', 'tank']],
+  [/wall|brick|crete|concrete|cinder|stone|tile|lab|fifties|generic/, ['wall', 'crete', 'brick', 'tile', 'generic']],
+];
+
+function searchWad(terms, maskedPref) {
+  // prefer masked ({) textures when the needed texture is masked
+  for (const wantMasked of (maskedPref ? [true, false] : [false, true])) {
+    for (const t of terms) {
+      for (const it of wadIndex) {
+        const m = it.name.startsWith('{');
+        if (m === wantMasked && it.name.includes(t)) return it.e;
+      }
+    }
+  }
+  return null;
+}
+
 function findEntry(nm) {
   for (const w of wads) { const e = w.get(nm); if (e) return e; }       // 1. exact
   const base = norm(nm);
   for (const it of wadIndex) if (it.base === base) return it.e;          // 2. ignore prefix
   const trimmed = base.replace(/[a-z]$/, '');                            // 3. drop trailing variant letter
   if (trimmed !== base) for (const it of wadIndex) if (it.base === trimmed) return it.e;
-  // 4. longest common-prefix fuzzy (>= 6 chars), pick the best
-  let best = null, bestLen = 5;
+  let best = null, bestLen = 5;                                          // 4. longest common prefix
   for (const it of wadIndex) {
     let k = 0; const a = it.base, b = base; while (k < a.length && k < b.length && a[k] === b[k]) k++;
     if (k > bestLen) { bestLen = k; best = it.e; }
   }
-  return best;
+  if (best) return best;
+  // 5. category-based "good enough" texture (never a placeholder)
+  const masked = nm.startsWith('{');
+  for (const [re, terms] of CATEGORY) if (re.test(nm)) { const e = searchWad(terms, masked); if (e) return e; }
+  return searchWad(['wall', 'crete', 'generic'], masked) || wadIndex[0]?.e || null;
 }
 
 mkdirSync(OUT, { recursive: true });
