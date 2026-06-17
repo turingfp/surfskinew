@@ -64,6 +64,22 @@
   #toast { position:fixed; left:50%; top:22%; transform:translateX(-50%); z-index:7; pointer-events:none;
     font-size:20px; font-weight:700; color:var(--accent); text-shadow:0 2px 8px #000; opacity:0; transition:opacity .2s; }
 
+  /* Scoreboard (hold Tab) */
+  #scoreboard { position:fixed; left:50%; top:14%; transform:translateX(-50%); z-index:8; display:none;
+    background:var(--panel); border:1px solid rgba(127,209,174,0.3); border-radius:12px; padding:14px 18px;
+    min-width:420px; box-shadow:0 20px 60px rgba(0,0,0,0.6); }
+  #scoreboard.show { display:block; }
+  #scoreboard .sb-title { color:var(--accent); letter-spacing:2px; font-size:13px; margin-bottom:8px; }
+  #scoreboard table { width:100%; border-collapse:collapse; font-size:13px; }
+  #scoreboard th { text-align:left; color:#7f93a4; font-weight:600; padding:3px 8px; border-bottom:1px solid #2f3f4f; }
+  #scoreboard td { padding:3px 8px; color:#e6eef5; font-variant-numeric:tabular-nums; }
+  #scoreboard tr.me td { color:var(--accent); font-weight:700; }
+  #scoreboard .sb-hint { color:#5f7384; font-size:11px; text-align:right; margin-top:6px; }
+  /* Kill feed */
+  #killfeed { position:fixed; right:14px; top:120px; z-index:7; pointer-events:none; display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
+  #killfeed .kf { background:rgba(10,16,22,0.6); border-radius:5px; padding:3px 9px; font-size:13px; color:#dfe9f2; }
+  #killfeed .kf b { color:var(--cs); }
+
   /* Overlay menu */
   #overlay { position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
     background:rgba(6,10,14,0.84); backdrop-filter:blur(4px); overflow:auto; }
@@ -101,6 +117,14 @@
   </div>
   <div id="hitmarker"></div>
   <div id="toast"></div>
+
+  <div id="scoreboard">
+    <div class="sb-title">RACE — <span id="sb-map">surf_ski_2</span></div>
+    <table><thead><tr><th>#</th><th>Player</th><th>Top</th><th>Time</th><th>K</th><th>D</th></tr></thead>
+    <tbody id="sb-body"></tbody></table>
+    <div class="sb-hint">hold TAB</div>
+  </div>
+  <div id="killfeed"></div>
 
   <div id="hud-tl" class="hud"><b id="mapname">surf_ski_2</b> · <span id="runstate">ready</span></div>
 
@@ -156,6 +180,7 @@
         </div>
         <div class="sec">
           <h2>Multiplayer</h2>
+          <div class="field"><span>Name</span><input id="mp-name" type="text" maxlength="16" placeholder="Surfer" /></div>
           <div class="field"><span>Room</span><span class="row2"><input id="mp-room" type="text" value="public" maxlength="24" /><button class="btn" id="mp-join" type="button">Leave</button></span></div>
           <div class="field"><span>Status</span><span class="mpstat" id="mp-status">connecting…</span></div>
           <h2 style="margin-top:16px">Settings</h2>

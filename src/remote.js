@@ -66,6 +66,19 @@ export class RemotePlayers {
 
   clear() { for (const id of [...this.players.keys()]) this.remove(id); }
 
+  // Scoreboard rows for connected peers.
+  list() {
+    const out = [];
+    for (const [id, p] of this.players) {
+      const d = p.cur || {};
+      out.push({ id, name: d.nm || id.slice(0, 6), peak: d.pk || 0, time: d.t || 0, kills: d.k || 0, deaths: d.d || 0, hp: d.hp != null ? d.hp : 100, color: p.color });
+    }
+    return out;
+  }
+
+  // For hit detection: GS origin (centre) of each peer.
+  forEach(cb) { for (const [id, p] of this.players) if (p.cur && p.cur.o) cb(id, p.cur.o, p); }
+
   get color() { return COLORS; }
   colorFor(id) { const p = this.players.get(id); return p ? p.color : 0xffffff; }
 

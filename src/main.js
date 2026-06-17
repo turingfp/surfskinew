@@ -134,6 +134,17 @@ const PB_SPEED_KEY = `surf_pbspeed_${MAP_NAME}`;
 let pbTime = Number(localStorage.getItem(PB_TIME_KEY)) || null;
 let pbSpeed = Number(localStorage.getItem(PB_SPEED_KEY)) || 0;
 
+// multiplayer identity + combat stats
+let playerName = localStorage.getItem('surf_name') || `Surfer${Math.floor(1000 + Math.random() * 9000)}`;
+let health = 100, kills = 0, deaths = 0;
+let finishTime = null; // set when a finish zone is crossed (if configured)
+
+// Optional per-map start/finish zones for timed runs. Start auto-derives from
+// the spawn; finish is map-specific (left null = freestyle race by top speed).
+const MAP_ZONES = {
+  // surf_green: { finish: { min: [...], max: [...] } },
+};
+
 function applySettings() {
   if (input) input.sensitivity = SETTINGS.sens / 1000;
   if (weapons) weapons.masterVol = SETTINGS.vol / 100;
@@ -177,8 +188,12 @@ function respawn() {
   state.velocity = [0, 0, 0];
   if (input) { input.yaw = spawn.yaw; input.pitch = 0; }
   prevOrigin = copy(state.origin);
-  runTime = 0; runStarted = false;
+  runTime = 0; runStarted = false; finishTime = null;
   if (hud) hud.peak = 0;
+}
+
+function inAABB(p, b) {
+  return p[0] >= b.min[0] && p[0] <= b.max[0] && p[1] >= b.min[1] && p[1] <= b.max[1] && p[2] >= b.min[2] && p[2] <= b.max[2];
 }
 
 function fmtClock(t) {
@@ -242,7 +257,19 @@ function stepPhysics(dt) {
 
   // start the run timer on first real movement input
   if (!runStarted && (cmd.forwardmove || cmd.sidemove || cmd.jump)) runStarted = true;
-  if (runStarted) runTime += dt;
+  if (runStarted && finishTime == null) runTime += dt;
+
+  // timed-run finish (only if a finish zone is configured for this map)
+  const fz = MAP_ZONES[MAP_NAME] && MAP_ZONES[MAP_NAME].finish;
+  if (fz && finishTime == null && runStarted && inAABB(state.origin, fz)) {
+    finishTime = runTime;
+    const key = `surf_finish_${MAP_NAME}`;
+    const prev = Number(localStorage.getItem(key)) || null;
+    if (prev == null || finishTime < prev) {
+      try { localStorage.setItem(key, String(finishTime)); } catch { /* ignore */ }
+      if (hud) hud.toast(`NEW RECORD  ${fmtClock(finishTime)}`, '#ffd166');
+    } else if (hud) hud.toast(`FINISH  ${fmtClock(finishTime)}`, '#7fd1ae');
+  }
 
   // Falling off is handled by the map's own trigger_teleport volumes (which we
   // now simulate). killZ is just a last-resort net for maps without them, so
@@ -342,9 +369,13 @@ function frame(nowMs) {
     netAcc += dt;
     if (netAcc >= 0.05) {
       netAcc = 0;
-      net.broadcastState({ o: [state.origin[0], state.origin[1], state.origin[2]], y: input.yaw, p: pitchEff, w: input.weapon });
+      net.broadcastState({
+        o: [state.origin[0], state.origin[1], state.origin[2]], y: input.yaw, p: pitchEff, w: input.weapon,
+        nm: playerName, pk: Math.round(hud.peak), t: runStarted ? runTime : 0, hp: health, k: kills, d: deaths, fin: finishTime,
+      });
     }
   }
+  updateScoreboard(sp);
 
   renderer.info.reset();
   renderer.clear();
@@ -358,6 +389,28 @@ function frame(nowMs) {
     renderer.clearDepth();
     renderer.render(viewmodel.scene, viewmodel.camera);
   }
+}
+
+// ---- Scoreboard / kill feed ------------------------------------------------
+const sbEl = () => document.getElementById('scoreboard');
+function escHtml(s) { return String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])); }
+function updateScoreboard() {
+  const el = sbEl(); if (!el) return;
+  const show = !!(input && input.scoreboard);
+  el.classList.toggle('show', show);
+  if (!show) return;
+  const rows = [{ name: `${playerName} (you)`, peak: Math.round(hud.peak), time: runStarted ? runTime : 0, kills, deaths, me: true }];
+  if (remotePlayers) for (const r of remotePlayers.list()) rows.push({ name: r.name, peak: Math.round(r.peak), time: r.time, kills: r.kills, deaths: r.deaths, me: false });
+  rows.sort((a, b) => b.peak - a.peak);
+  const body = document.getElementById('sb-body');
+  if (body) body.innerHTML = rows.map((r, i) => `<tr class="${r.me ? 'me' : ''}"><td>${i + 1}</td><td>${escHtml(r.name)}</td><td>${r.peak}</td><td>${fmtClock(r.time)}</td><td>${r.kills}</td><td>${r.deaths}</td></tr>`).join('');
+}
+function addKill(html) {
+  const kf = document.getElementById('killfeed'); if (!kf) return;
+  const d = document.createElement('div'); d.className = 'kf'; d.innerHTML = html;
+  kf.appendChild(d);
+  setTimeout(() => d.remove(), 4500);
+  while (kf.children.length > 5) kf.removeChild(kf.firstChild);
 }
 
 // ---- Boot ------------------------------------------------------------------
@@ -415,6 +468,12 @@ async function boot() {
 
     hud = new HUD(document);
     hud.setMap(MAP_NAME);
+    { const sm = document.getElementById('sb-map'); if (sm) sm.textContent = MAP_NAME; }
+    const nameInput = document.getElementById('mp-name');
+    if (nameInput) {
+      nameInput.value = playerName;
+      nameInput.addEventListener('input', () => { playerName = nameInput.value.trim() || playerName; try { localStorage.setItem('surf_name', playerName); } catch { /* ignore */ } });
+    }
     respawn();
 
     // First-person weapon viewmodel (CC0 Quaternius guns). Non-blocking:

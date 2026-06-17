@@ -20,6 +20,7 @@ export class Input {
     this.locked = false;       // pointer lock is actually held
     this.autohop = false;
     this.noclip = false;
+    this.scoreboard = false;
     this.weapon = 'pistol';
     this._onActive = [];
     this._onRespawn = [];
@@ -105,6 +106,7 @@ export class Input {
     const ae = document.activeElement;
     if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
     const code = e.code;
+    if (code === 'Tab') { this.scoreboard = down; if (this.active) e.preventDefault(); return; }
     if (down && code === 'Escape') { this.stop(); return; }
     // Not playing yet? Any key (Enter/Space/etc.) starts — a reliable path that
     // doesn't depend on the click reaching the canvas or pointer lock working.
