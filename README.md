@@ -7,6 +7,10 @@ ES modules and a locally-vendored Three.js.
 
 ![surf_ski_2 in the browser](docs/shot_spawn.png)
 
+> **New here?** [`HOWITWORKS.md`](HOWITWORKS.md) is a casual rundown of how it
+> all works. [`RELEASE.md`](RELEASE.md) is an honest assessment of what it would
+> take to actually release this.
+
 The acceptance bar set by the spec was *"the exact feel of GoldSrc air strafing
 and determinism."* That's the core of this project: the movement is a
 line-for-line port of the engine's per-tick functions, collision runs against
