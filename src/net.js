@@ -38,10 +38,16 @@ export class Net {
     // a settable .onMessage(payload, { peerId }).
     const stateAction = this.room.makeAction('st');
     const shotAction = this.room.makeAction('shot');
+    const hitAction = this.room.makeAction('hit');
+    const fragAction = this.room.makeAction('frag');
     stateAction.onMessage = (data, meta) => this._emit('state', meta.peerId, data);
     shotAction.onMessage = (data, meta) => this._emit('shot', meta.peerId, data);
+    hitAction.onMessage = (data, meta) => this._emit('hit', meta.peerId, data);
+    fragAction.onMessage = (data, meta) => this._emit('frag', meta.peerId, data);
     this.sendState = (d) => stateAction.send(d);
     this.sendShot = (d) => shotAction.send(d);
+    this.sendHit = (peerId, d) => hitAction.send(d, peerId); // targeted to the victim
+    this.sendFrag = (d) => fragAction.send(d);
 
     // 0.25 exposes these as setter properties, not methods.
     this.room.onPeerJoin = (id) => { this.peers.add(id); this._emit('count', this.count); };
@@ -54,6 +60,8 @@ export class Net {
 
   broadcastState(data) { if (this.sendState) try { this.sendState(data); } catch { /* not ready */ } }
   broadcastShot(data) { if (this.sendShot) try { this.sendShot(data); } catch { /* not ready */ } }
+  sendHitTo(peerId, data) { if (this.sendHit) try { this.sendHit(peerId, data); } catch { /* not ready */ } }
+  broadcastFrag(data) { if (this.sendFrag) try { this.sendFrag(data); } catch { /* not ready */ } }
 
   leave() {
     if (this.room) { try { this.room.leave(); } catch { /* ignore */ } }

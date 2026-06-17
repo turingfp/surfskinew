@@ -9,17 +9,17 @@ import { normalize, angleVectors } from './vec.js';
 
 const SPECS = {
   pistol: {
-    label: 'USP', sound: 'pistol', rate: 0.15, auto: false, kick: 0.6, spread: 0.006, pellets: 1,
+    label: 'USP', sound: 'pistol', rate: 0.15, auto: false, kick: 0.6, spread: 0.006, pellets: 1, dmg: 24,
     tracer: 0xbfe0ff, vol: 0.5, clip: 12, reserve: 120, reload: 2.2,
     out: 'pistol_out', in: 'pistol_in', rack: 'pistol_slide',
   },
   rifle: {
-    label: 'M4A1', sound: 'rifle', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, pellets: 1,
+    label: 'M4A1', sound: 'rifle', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, pellets: 1, dmg: 28,
     tracer: 0xfff0a0, vol: 0.5, clip: 30, reserve: 90, reload: 3.0,
     out: 'rifle_out', in: 'rifle_in', rack: 'rifle_bolt',
   },
   shotgun: {
-    label: 'M3', sound: 'shotgun', rate: 0.8, auto: false, kick: 1.1, spread: 0.07, pellets: 8,
+    label: 'M3', sound: 'shotgun', rate: 0.8, auto: false, kick: 1.1, spread: 0.07, pellets: 8, dmg: 11,
     tracer: 0xffd890, vol: 0.6, clip: 8, reserve: 32, reload: 2.6,
     out: 'shotgun_pump', in: 'shotgun_insert', rack: 'shotgun_pump',
   },
@@ -99,6 +99,8 @@ export class Weapons {
     this._maxDecals = 96;
 
     this.onShot = null; // (data) => broadcast
+    this.playerHitTest = null; // (eyeGS, dirGS) => {id, dist} | null
+    this.onPlayerHit = null; // (peerId, dmg, label) => void
   }
 
   setWorld(w) { this.world = w; }
@@ -210,13 +212,21 @@ export class Weapons {
     for (let i = 0; i < (spec.pellets || 1); i++) {
       const dir = spreadDir(dirGS, spec.spread);
       const end = [opts.eyeGS[0] + dir[0] * 8192, opts.eyeGS[1] + dir[1] * 8192, opts.eyeGS[2] + dir[2] * 8192];
-      let hit = end; let normal = null;
+      let hit = end; let normal = null; let worldDist = 8192;
       if (this.world) {
         const tr = this.world.traceHull(opts.eyeGS, end, 1);
-        if (tr.fraction < 1) { hit = tr.endpos; normal = tr.plane ? tr.plane.normal : null; }
+        if (tr.fraction < 1) { hit = tr.endpos; normal = tr.plane ? tr.plane.normal : null; worldDist = 8192 * tr.fraction; }
       }
-      this._tracer(opts.eyeGS, hit, spec.tracer);
-      if (normal) this._decal(hit, normal);
+      // player hit-detection (closer than the world hit = a hit on a player)
+      const ph = this.playerHitTest ? this.playerHitTest(opts.eyeGS, dir) : null;
+      if (ph && ph.dist < worldDist) {
+        const p = [opts.eyeGS[0] + dir[0] * ph.dist, opts.eyeGS[1] + dir[1] * ph.dist, opts.eyeGS[2] + dir[2] * ph.dist];
+        this._tracer(opts.eyeGS, p, 0xff5555);
+        if (this.onPlayerHit) this.onPlayerHit(ph.id, spec.dmg, spec.label);
+      } else {
+        this._tracer(opts.eyeGS, hit, spec.tracer);
+        if (normal) this._decal(hit, normal);
+      }
     }
   }
 

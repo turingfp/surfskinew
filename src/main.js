@@ -189,7 +189,44 @@ function respawn() {
   if (input) { input.yaw = spawn.yaw; input.pitch = 0; }
   prevOrigin = copy(state.origin);
   runTime = 0; runStarted = false; finishTime = null;
+  health = 100;
   if (hud) hud.peak = 0;
+}
+
+// Ray vs sphere (GS). Returns distance along (normalized) dir to the hit, or null.
+function raySphere(eye, dir, c, r) {
+  const ox = c[0] - eye[0], oy = c[1] - eye[1], oz = c[2] - eye[2];
+  const t = ox * dir[0] + oy * dir[1] + oz * dir[2];
+  if (t < 0) return null;
+  const dx = ox - dir[0] * t, dy = oy - dir[1] * t, dz = oz - dir[2] * t;
+  return (dx * dx + dy * dy + dz * dz) <= r * r ? t : null;
+}
+
+// Closest remote player hit by a shot (body sphere + head sphere).
+function playerHitTest(eyeGS, dirGS) {
+  if (!remotePlayers) return null;
+  let best = null;
+  remotePlayers.forEach((id, o) => {
+    const body = raySphere(eyeGS, dirGS, o, 22);
+    const head = raySphere(eyeGS, dirGS, [o[0], o[1], o[2] + 30], 13);
+    let t = null;
+    if (body != null) t = body;
+    if (head != null && (t == null || head < t)) t = head;
+    if (t != null && (!best || t < best.dist)) best = { id, dist: t };
+  });
+  return best;
+}
+
+function applyDamage(dmg, by) {
+  if (input && input.noclip) return;
+  health -= dmg;
+  if (health <= 0) {
+    deaths++;
+    addKill(`<b>${escHtml(by)}</b> ▸ ${escHtml(playerName)}`);
+    if (net && net.connected) net.broadcastFrag({ by, victim: playerName });
+    if (hud) hud.toast(`Fragged by ${escHtml(by)}`, '#ff6b6b');
+    respawn(); // resets health to 100
+  }
 }
 
 function inAABB(p, b) {
@@ -339,6 +376,9 @@ function frame(nowMs) {
       pitch: pitchEff,
     });
   }
+  // slow health regen between fights
+  if (health < 100) health = Math.min(100, health + dt * 7);
+
   // track all-time top speed (per map)
   if (hud.peak > pbSpeed) { pbSpeed = hud.peak; try { localStorage.setItem(PB_SPEED_KEY, String(Math.round(pbSpeed))); } catch { /* ignore */ } }
 
@@ -357,7 +397,7 @@ function frame(nowMs) {
     noclip: input.noclip,
     cp: !!checkpoint,
     players: net ? net.count : 1,
-    health: 100,
+    health: Math.round(health),
     armor: 100,
     runstate: runStarted ? 'running' : 'ready',
     ammo: weapons ? weapons.ammoState() : null,
@@ -499,6 +539,11 @@ async function boot() {
     weapons = new Weapons(scene, viewmodel);
     weapons.setWorld(world);
     weapons.masterVol = SETTINGS.vol / 100;
+    weapons.playerHitTest = playerHitTest;
+    weapons.onPlayerHit = (id, dmg) => {
+      if (net && net.connected) net.sendHitTo(id, { dmg, by: playerName });
+      if (hud) hud.hitMarker();
+    };
     weapons.loadSounds({
       pistol: 'assets/sounds/pistol.wav', rifle: 'assets/sounds/rifle.wav', shotgun: 'assets/sounds/shotgun.wav',
       pistol_out: 'assets/sounds/pistol_out.wav', pistol_in: 'assets/sounds/pistol_in.wav', pistol_slide: 'assets/sounds/pistol_slide.wav',
@@ -513,6 +558,11 @@ async function boot() {
     net.on('state', (id, data) => remotePlayers.update(id, data));
     net.on('leave', (id) => remotePlayers.remove(id));
     net.on('shot', (id, data) => { if (weapons) weapons.remoteShot(data); });
+    net.on('hit', (id, data) => applyDamage(data.dmg || 0, data.by || 'someone'));
+    net.on('frag', (id, data) => {
+      addKill(`<b>${escHtml(data.by)}</b> ▸ ${escHtml(data.victim)}`);
+      if (data.by === playerName) kills++;
+    });
     net.on('count', (n) => { const el = document.getElementById('peercount'); if (el) el.textContent = n; });
     weapons.onShot = (data) => { if (net.connected) net.broadcastShot(data); };
 
