@@ -697,6 +697,10 @@ async function boot() {
 
     // ---- P2P multiplayer (serverless WebRTC via Trystero) ----
     remotePlayers = new RemotePlayers(scene);
+    // posed CS player model (sequence 1 = idle) for remote avatars
+    loadMDL('assets/models/cs/player/leet.mdl', { sequence: 1 })
+      .then((data) => remotePlayers.setTemplate(buildWorldModel(data, { center: false })))
+      .catch((e) => console.warn('[surf] player model load failed:', e.message));
     net = new Net();
     net.on('state', (id, data) => remotePlayers.update(id, data));
     net.on('leave', (id) => remotePlayers.remove(id));
@@ -791,6 +795,7 @@ async function boot() {
       setVMEuler: (x, y, z) => viewmodel && viewmodel.setVMEuler(x, y, z),
       vmReady: () => !!(viewmodel && Object.keys(viewmodel.weapons).length),
       selectWeapon: (n) => { if (input) input.weapon = n; if (viewmodel) viewmodel.select(n); },
+      addBot: (o, y) => remotePlayers && remotePlayers.update('TESTBOT', { o, y: y || 0, nm: 'BOT' }),
       tick: (cmd, dt = FIXED_DT) => { runTick(state, cmd, world, { autohop: false }, dt); return speed2d(state); },
       // Tick against a caller-supplied (e.g. open-air) world — isolates the
       // movement maths from level collision for testing.

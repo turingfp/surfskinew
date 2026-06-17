@@ -64,25 +64,43 @@ export function parseMDL(arrayBuffer, opts = {}) {
   const f32 = (o) => dv.getFloat32(o, true);
   const u8 = (o) => dv.getUint8(o);
   const i16 = (o) => dv.getInt16(o, true);
+  const u16 = (o) => dv.getUint16(o, true);
   const str = (o, n) => { let s = ''; for (let i = 0; i < n; i++) { const c = u8(o + i); if (!c) break; s += String.fromCharCode(c); } return s; };
 
   if (dv.getUint32(0, true) !== 0x54534449) throw new Error('not an IDST mdl'); // "IDST"
 
   const numbones = i32(140), boneindex = i32(144);
+  const numseq = i32(164), seqindex = i32(168);
   const numtextures = i32(180), textureindex = i32(184);
   const numskinref = i32(192), skinindex = i32(200);
   const numbodyparts = i32(204), bodypartindex = i32(208);
 
-  // ---- bones -> world matrices (reference pose) ----
+  // optional: pose a sequence's frame 0 (e.g. idle) instead of the bind pose
+  let anim = null;
+  if (opts.sequence != null && opts.sequence < numseq) {
+    const sd = seqindex + opts.sequence * 176;
+    anim = i32(sd + 124); // animindex (mstudioanim_t[bones], blend 0)
+  }
+  // RLE-decoded animation value for a bone channel at frame 0
+  function animFrame0(animBase, bone, ch) {
+    const off = u16(animBase + bone * 12 + ch * 2);
+    if (off === 0) return 0;
+    const p = animBase + bone * 12 + off; // first span; frame 0 => first value
+    return i16(p + 2); // skip [valid,total], read value[0]
+  }
+
+  // ---- bones -> world matrices ----
   const world = new Array(numbones);
   for (let b = 0; b < numbones; b++) {
     // mstudiobone_t: name[32], parent@32, flags@36, bonecontroller[6]@40,
     // value[6]@64 (pos xyz + rot xyz), scale[6]@88.
     const o = boneindex + b * 112;
     const parent = i32(o + 32);
-    const vx = f32(o + 64), vy = f32(o + 68), vz = f32(o + 72);
-    const rx = f32(o + 76), ry = f32(o + 80), rz = f32(o + 84);
-    const local = quatMatrix(angleQuaternion(rx, ry, rz), vx, vy, vz);
+    const v = [f32(o + 64), f32(o + 68), f32(o + 72), f32(o + 76), f32(o + 80), f32(o + 84)];
+    if (anim != null) {
+      for (let j = 0; j < 6; j++) v[j] += animFrame0(anim, b, j) * f32(o + 88 + j * 4);
+    }
+    const local = quatMatrix(angleQuaternion(v[3], v[4], v[5]), v[0], v[1], v[2]);
     world[b] = parent >= 0 ? concat(world[parent], local) : local;
   }
 

@@ -28,28 +28,32 @@ export class RemotePlayers {
     this.scene = scene;
     this.players = new Map();
     this._ci = 0;
+    this.template = null; // posed CS player model, cloned per peer
   }
+
+  setTemplate(group) { this.template = group; }
 
   _make(id) {
     const color = COLORS[this._ci++ % COLORS.length];
     const group = new THREE.Group();
-    const mat = new THREE.MeshLambertMaterial({ color });
-    // body capsule sized to the player hull (32 wide, 72 tall), centred on origin
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(14, 44, 6, 12), mat);
+    let body;
+    if (this.template) {
+      body = this.template.clone(true);
+      body.position.y = -36; // feet 36u below the player centre
+    } else {
+      // fallback avatar (capsule + head)
+      body = new THREE.Group();
+      const cap = new THREE.Mesh(new THREE.CapsuleGeometry(14, 44, 6, 12), new THREE.MeshLambertMaterial({ color }));
+      const head = new THREE.Mesh(new THREE.SphereGeometry(9, 12, 10), new THREE.MeshLambertMaterial({ color: 0xffe0bd }));
+      head.position.y = 30; body.add(cap, head);
+    }
     group.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(9, 12, 10), new THREE.MeshLambertMaterial({ color: 0xffe0bd }));
-    head.position.y = 30;
-    group.add(head);
-    // little gun nub so you can read their facing
-    const gun = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 22), new THREE.MeshLambertMaterial({ color: 0x222222 }));
-    gun.position.set(10, 16, -14);
-    group.add(gun);
     const label = makeLabel(id.slice(0, 6), color);
     label.position.y = 52;
     group.add(label);
     group.position.set(99999, 99999, 99999); // offscreen until first update
     this.scene.add(group);
-    const p = { group, color, cur: null, started: false };
+    const p = { group, body, color, cur: null, started: false };
     this.players.set(id, p);
     return p;
   }
@@ -95,7 +99,7 @@ export class RemotePlayers {
         g.position.y += (ty - g.position.y) * k;
         g.position.z += (tz - g.position.z) * k;
       }
-      g.rotation.y = -(p.cur.y || 0) + Math.PI / 2;
+      if (p.body) p.body.rotation.y = (p.cur.y || 0); // face their yaw
     }
   }
 }

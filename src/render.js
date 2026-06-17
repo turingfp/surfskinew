@@ -257,7 +257,7 @@ export function buildProcLevel(brushes) {
 
 // Build a small spinnable world mesh from a parsed MDL (w_ weapon models), in
 // world space (GoldSrc -> three), centered at the origin so it spins in place.
-export function buildWorldModel(data) {
+export function buildWorldModel(data, { center = true } = {}) {
   const group = new THREE.Group();
   for (const g of data.groups) {
     const n = g.positions.length / 3;
@@ -282,10 +282,12 @@ export function buildWorldModel(data) {
     const m = new THREE.Mesh(geo, mat); m.frustumCulled = false;
     group.add(m);
   }
-  // centre on the model bbox so it rotates about itself
-  const box = new THREE.Box3().setFromObject(group);
-  const c = box.getCenter(new THREE.Vector3());
-  group.children.forEach((m) => m.position.sub(c));
+  if (center) {
+    // centre on the bbox so it rotates about itself (weapon pickups)
+    const box = new THREE.Box3().setFromObject(group);
+    const c = box.getCenter(new THREE.Vector3());
+    group.children.forEach((m) => m.position.sub(c));
+  }
   return group;
 }
 
