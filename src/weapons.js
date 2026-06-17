@@ -229,7 +229,8 @@ export class Weapons {
       const end = [opts.eyeGS[0] + dir[0] * 8192, opts.eyeGS[1] + dir[1] * 8192, opts.eyeGS[2] + dir[2] * 8192];
       let hit = end; let normal = null; let worldDist = 8192;
       if (this.world) {
-        const tr = this.world.traceHull(opts.eyeGS, end, 1);
+        // point trace so decals land exactly on the surface (not a hull-width out)
+        const tr = this.world.traceBullet ? this.world.traceBullet(opts.eyeGS, end) : this.world.traceHull(opts.eyeGS, end, 1);
         if (tr.fraction < 1) { hit = tr.endpos; normal = tr.plane ? tr.plane.normal : null; worldDist = 8192 * tr.fraction; }
       }
       // player hit-detection (closer than the world hit = a hit on a player)
@@ -252,7 +253,7 @@ export class Weapons {
     const dirGS = angleVectors(data.p || 0, data.y || 0).forward;
     const end = [data.o[0] + dirGS[0] * 8192, data.o[1] + dirGS[1] * 8192, data.o[2] + dirGS[2] * 8192];
     let hit = end; let normal = null;
-    if (this.world) { const tr = this.world.traceHull(data.o, end, 1); if (tr.fraction < 1) { hit = tr.endpos; normal = tr.plane ? tr.plane.normal : null; } }
+    if (this.world) { const tr = this.world.traceBullet ? this.world.traceBullet(data.o, end) : this.world.traceHull(data.o, end, 1); if (tr.fraction < 1) { hit = tr.endpos; normal = tr.plane ? tr.plane.normal : null; } }
     this._tracer(data.o, hit, spec.tracer);
     if (normal) this._decal(hit, normal);
   }

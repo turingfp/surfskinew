@@ -26,6 +26,8 @@ export class CollisionWorld {
   constructor(bsp) {
     this.planes = bsp.planes;
     this.clip = bsp.clipnodes;
+    this.nodes = bsp.nodes;
+    this.leafContents = bsp.leafContents;
     this.models = bsp.models;
     this._head = 0;
 
@@ -95,6 +97,70 @@ export class CollisionWorld {
       }
     }
     return combined;
+  }
+
+  // ---- Point trace against the node tree (hull 0) -- accurate bullet impacts.
+  _nodeContents(num, p) {
+    const { planenum, child0, child1 } = this.nodes;
+    while (num >= 0) {
+      const plane = this.planes[planenum[num]];
+      const d = plane.type < 3 ? p[plane.type] - plane.dist : dot(plane.normal, p) - plane.dist;
+      num = d < 0 ? child1[num] : child0[num];
+    }
+    return this.leafContents[-num - 1] !== undefined ? this.leafContents[-num - 1] : CONTENTS.EMPTY;
+  }
+
+  // Sweep a POINT against worldspawn + solid brush models (for bullet decals so
+  // impacts land exactly on the surface, not a hull-width in front of it).
+  traceBullet(start, end) {
+    const combined = { fraction: 1, endpos: copy(end), plane: null, startsolid: false, allsolid: false };
+    if (!this.nodes) return this.traceHull(start, end, 1); // fallback
+    for (const mi of this.solidModels) {
+      const head = this.models[mi].headnode[0];
+      if (head == null) continue;
+      this._nodeHead = head;
+      const tr = { fraction: 1, endpos: copy(end), plane: null, startsolid: false, allsolid: true };
+      this._nodeCheck(head, 0, 1, start, end, tr);
+      if (tr.startsolid) combined.startsolid = true;
+      if (tr.fraction < combined.fraction) { combined.fraction = tr.fraction; combined.endpos = tr.endpos; combined.plane = tr.plane; }
+    }
+    return combined;
+  }
+
+  _nodeCheck(num, p1f, p2f, p1, p2, trace) {
+    if (num < 0) {
+      const c = this.leafContents[-num - 1];
+      if (c !== CONTENTS.SOLID) trace.allsolid = false;
+      else trace.startsolid = true;
+      return true;
+    }
+    const { planenum, child0, child1 } = this.nodes;
+    const plane = this.planes[planenum[num]];
+    let t1, t2;
+    if (plane.type < 3) { t1 = p1[plane.type] - plane.dist; t2 = p2[plane.type] - plane.dist; }
+    else { t1 = dot(plane.normal, p1) - plane.dist; t2 = dot(plane.normal, p2) - plane.dist; }
+    if (t1 >= 0 && t2 >= 0) return this._nodeCheck(child0[num], p1f, p2f, p1, p2, trace);
+    if (t1 < 0 && t2 < 0) return this._nodeCheck(child1[num], p1f, p2f, p1, p2, trace);
+    let frac = t1 < 0 ? (t1 + DIST_EPSILON) / (t1 - t2) : (t1 - DIST_EPSILON) / (t1 - t2);
+    if (frac < 0) frac = 0; else if (frac > 1) frac = 1;
+    let midf = p1f + (p2f - p1f) * frac;
+    const mid = [p1[0] + frac * (p2[0] - p1[0]), p1[1] + frac * (p2[1] - p1[1]), p1[2] + frac * (p2[2] - p1[2])];
+    const side = t1 < 0 ? 1 : 0;
+    const nearC = side === 0 ? child0[num] : child1[num];
+    const farC = side === 0 ? child1[num] : child0[num];
+    if (!this._nodeCheck(nearC, p1f, midf, p1, mid, trace)) return false;
+    if (this._nodeContents(farC, mid) !== CONTENTS.SOLID) return this._nodeCheck(farC, midf, p2f, mid, p2, trace);
+    if (trace.allsolid) return false;
+    if (side === 0) trace.plane = { normal: copy(plane.normal), dist: plane.dist };
+    else trace.plane = { normal: [-plane.normal[0], -plane.normal[1], -plane.normal[2]], dist: -plane.dist };
+    while (this._nodeContents(this._nodeHead, mid) === CONTENTS.SOLID) {
+      frac -= 0.1;
+      if (frac < 0) { trace.fraction = midf; trace.endpos = copy(mid); return false; }
+      midf = p1f + (p2f - p1f) * frac;
+      mid[0] = p1[0] + frac * (p2[0] - p1[0]); mid[1] = p1[1] + frac * (p2[1] - p1[1]); mid[2] = p1[2] + frac * (p2[2] - p1[2]);
+    }
+    trace.fraction = midf; trace.endpos = copy(mid);
+    return false;
   }
 
   recursiveHullCheck(num, p1f, p2f, p1, p2, trace) {

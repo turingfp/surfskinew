@@ -36,9 +36,11 @@ export function makeBrush(center, he, euler = [0, 0, 0], opts = {}) {
 export class BrushWorld {
   constructor(brushes) {
     this.brushes = brushes;
-    this.hull = { 1: [16, 16, 36], 3: [16, 16, 18] };
+    this.hull = { 0: [0, 0, 0], 1: [16, 16, 36], 3: [16, 16, 18] };
     this.solidModels = [0]; // compatibility with callers that read this
   }
+
+  traceBullet(start, end) { return this.traceHull(start, end, 0); }
 
   _half(h) { return this.hull[h] || this.hull[1]; }
 
@@ -135,5 +137,6 @@ export function generateSurfArena() {
 
   const bounds = { min: [-512, -3400, endZ - 800], max: [endX + 800, 3400, 900] };
   const finish = { min: [endX - 360, -360, endZ + 18], max: [endX + 360, 360, endZ + 260] };
-  return { brushes, spawn, bounds, finish, killZ: endZ - 700 };
+  // killZ sits above the safety floor so falling off a ramp resets you to spawn.
+  return { brushes, spawn, bounds, finish, killZ: endZ - 240 };
 }

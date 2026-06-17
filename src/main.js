@@ -122,6 +122,9 @@ let checkpoint = null; // {origin, yaw} for practice save/load
 const MAPS = {
   surf_ski_2: 'assets/maps/surf_ski_2.bsp',
   surf_green: 'assets/maps/surf_green.bsp',
+  surf_nice_fly_3: 'assets/maps/surf_nice_fly_3.bsp',
+  surf_sand: 'assets/maps/surf_sand.bsp',
+  surf_egypt: 'assets/maps/surf_egypt.bsp',
   surf_arena: 'proc', // procedurally generated (no BSP)
 };
 const mapParam = new URLSearchParams(location.search).get('map');

@@ -46,6 +46,31 @@ export class BSP {
     this.parseClipNodes();
     this.parseModels();
     this.parseLighting();
+    this.parseNodes();
+    this.parseLeaves();
+  }
+
+  // ---- NODES (hull 0 / point-trace BSP tree) --------------------------------
+  parseNodes() {
+    const { offset, length } = this.lump(5);
+    const n = length / 24;
+    const planenum = new Int32Array(n), child0 = new Int32Array(n), child1 = new Int32Array(n);
+    for (let i = 0; i < n; i++) {
+      const o = offset + i * 24;
+      planenum[i] = this.view.getInt32(o, true);
+      child0[i] = this.view.getInt16(o + 4, true);
+      child1[i] = this.view.getInt16(o + 6, true);
+    }
+    this.nodes = { planenum, child0, child1, count: n };
+  }
+
+  // ---- LEAVES (contents only, for point traces) ----------------------------
+  parseLeaves() {
+    const { offset, length } = this.lump(10);
+    const n = length / 28;
+    const contents = new Int32Array(n);
+    for (let i = 0; i < n; i++) contents[i] = this.view.getInt32(offset + i * 28, true);
+    this.leafContents = contents;
   }
 
   // ---- LIGHTING (per-face lightmaps, RGB) ----------------------------------
