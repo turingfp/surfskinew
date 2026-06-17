@@ -7,7 +7,7 @@ export class HUD {
     this.el = {};
     for (const id of ['spd', 'spdbar', 'movestate', 'flags', 'timer', 'best', 'peak', 'pbspeed',
       'peercount', 'pos', 'health', 'armor', 'wname', 'clip', 'reserve', 'reloadmsg',
-      'runstate', 'mapname', 'toast', 'hitmarker']) {
+      'runstate', 'mapname', 'toast', 'hitmarker', 'fps']) {
       this.el[id] = root.getElementById(id);
     }
     this.peak = 0;
@@ -54,6 +54,7 @@ export class HUD {
     set('peak', Math.round(this.peak));
     set('pbspeed', Math.round(d.pbspeed || 0));
     set('peercount', d.players || 1);
+    if (d.fps != null) set('fps', Math.round(d.fps));
     if (this.el.pos && d.origin) set('pos', `${d.origin[0].toFixed(0)} ${d.origin[1].toFixed(0)} ${d.origin[2].toFixed(0)}`);
     set('health', d.health != null ? d.health : 100);
     set('armor', d.armor != null ? d.armor : 100);

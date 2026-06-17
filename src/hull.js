@@ -86,7 +86,17 @@ export class CollisionWorld {
   // closest impact (so func_wall surf ramps, doors, etc. all collide).
   traceHull(start, end, hullIndex = 1) {
     const combined = { fraction: 1, endpos: copy(end), plane: null, startsolid: false, allsolid: false };
+    // swept-segment AABB, expanded by the hull half-extents, for broad-phase
+    const hx = hullIndex === 3 ? 18 : 36;
+    const sMin = [Math.min(start[0], end[0]) - 16, Math.min(start[1], end[1]) - 16, Math.min(start[2], end[2]) - hx];
+    const sMax = [Math.max(start[0], end[0]) + 16, Math.max(start[1], end[1]) + 16, Math.max(start[2], end[2]) + hx];
     for (const mi of this.solidModels) {
+      if (mi !== 0) {
+        const m = this.models[mi];
+        if (sMin[0] > m.maxs[0] || sMax[0] < m.mins[0]
+          || sMin[1] > m.maxs[1] || sMax[1] < m.mins[1]
+          || sMin[2] > m.maxs[2] || sMax[2] < m.mins[2]) continue; // can't be touched
+      }
       const tr = this._traceModel(start, end, hullIndex, mi);
       if (tr.startsolid) combined.startsolid = true;
       if (tr.allsolid) combined.allsolid = true;

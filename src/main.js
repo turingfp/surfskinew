@@ -116,6 +116,7 @@ let runTime = 0;
 let runStarted = false;
 let netAcc = 0; // throttle state broadcasts to ~20 Hz
 let envWater = false, envLadder = false; // last movement environment (for HUD)
+let fpsEMA = 60; // smoothed frames-per-second for the HUD
 let checkpoint = null; // {origin, yaw} for practice save/load
 
 // ---- Map selection (?map=surf_green) ---------------------------------------
@@ -348,6 +349,7 @@ function frame(nowMs) {
   let dt = now - lastT;
   lastT = now;
   if (dt > 0.25) dt = 0.25; // avoid spiral-of-death after a tab stall
+  if (dt > 0) fpsEMA += ((1 / dt) - fpsEMA) * 0.1;
   accumulator += dt;
 
   let steps = 0;
@@ -402,6 +404,7 @@ function frame(nowMs) {
     noclip: input.noclip,
     cp: !!checkpoint,
     players: net ? net.count : 1,
+    fps: fpsEMA,
     health: Math.round(health),
     armor: 100,
     runstate: runStarted ? 'running' : 'ready',

@@ -24,7 +24,7 @@ export class Viewmodel {
 
     this.rig = new THREE.Group();
     // bottom-right placement in view space (camera looks down -Z)
-    this.baseX = 0.2; this.baseY = -0.3;
+    this.baseX = 0.2; this.baseY = -0.24;
     this.rig.position.set(this.baseX, this.baseY, -0.46);
     this.scene.add(this.rig);
 
