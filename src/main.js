@@ -421,8 +421,8 @@ async function boot() {
     // if it fails to load, the game still runs without a weapon.
     viewmodel = new Viewmodel();
     viewmodel.loadMDLWeapons({
-      // USP is one-handed: skip the unused floating "lhand" bodypart.
-      pistol: { url: 'assets/models/cs/v_usp.mdl', skip: ['lhand'] },
+      // USP is one-handed: skip the unused floating "rhand" bodypart.
+      pistol: { url: 'assets/models/cs/v_usp.mdl', skip: ['rhand'] },
       rifle: 'assets/models/cs/v_m4a1.mdl',
       shotgun: 'assets/models/cs/v_m3.mdl',
     }).then(async (names) => {
@@ -526,6 +526,7 @@ async function boot() {
       setLook: (yaw, pitch) => { input.yaw = yaw; input.pitch = pitch; },
       setVMEuler: (x, y, z) => viewmodel && viewmodel.setVMEuler(x, y, z),
       vmReady: () => !!(viewmodel && Object.keys(viewmodel.weapons).length),
+      selectWeapon: (n) => { if (input) input.weapon = n; if (viewmodel) viewmodel.select(n); },
       tick: (cmd, dt = FIXED_DT) => { runTick(state, cmd, world, { autohop: false }, dt); return speed2d(state); },
       // Tick against a caller-supplied (e.g. open-air) world — isolates the
       // movement maths from level collision for testing.
