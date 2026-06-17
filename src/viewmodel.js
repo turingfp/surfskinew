@@ -10,7 +10,7 @@ import { loadMDL } from './mdl.js';
 // Pistols (rhand bodypart skipped) end up sitting high after bbox-centering, so
 // we lower them so the gun reads at hand height rather than mid-screen.
 const VM_OFFSET = {
-  usp: [0, -0.075, 0.02], deagle: [0, -0.055, 0.01], glock: [0, -0.07, 0.02],
+  usp: [0, -0.13, 0.02], deagle: [0, -0.09, 0.01], glock: [0, -0.12, 0.02],
 };
 
 export class Viewmodel {
