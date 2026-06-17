@@ -133,9 +133,10 @@
 
   /* Touch controls */
   #touch { position:fixed; inset:0; z-index:7; display:none; pointer-events:none; }
-  #t-stickhint { position:fixed; left:80px; bottom:90px; width:120px; height:120px; opacity:0.5; }
+  #t-stickhint { position:fixed; left:80px; bottom:90px; width:120px; height:120px; opacity:0.5; transition:opacity 0.15s; }
   #t-stickhint .ring { position:absolute; inset:0; border:2px solid rgba(255,255,255,0.4); border-radius:50%; }
-  #t-stickhint .dot { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px; border-radius:50%; background:rgba(255,255,255,0.25); }
+  #t-stickhint .dot { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px; border-radius:50%;
+    background:rgba(127,209,174,0.45); border:2px solid rgba(255,255,255,0.6); }
   #t-buttons { position:fixed; right:18px; bottom:24px; display:flex; gap:12px; align-items:flex-end; pointer-events:auto; }
   #t-buttons button { pointer-events:auto; font-family:inherit; font-weight:700; color:#dff; background:rgba(20,33,44,0.7);
     border:1px solid #3a5364; border-radius:50%; width:62px; height:62px; font-size:12px; }

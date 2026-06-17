@@ -26,9 +26,12 @@ export class Input {
     this.weapon = 'usp';
     // touch state
     this.isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-    this.touchSens = 0.005;
-    this._tMove = { id: null, fx: 0, fy: 0 };
-    this._tLook = { id: null, x: 0, y: 0 };
+    if (this.isTouch) this.autohop = true; // chaining bhops/surf by tapping is impractical on mobile
+    this._tMove = { id: null, ox: 0, oy: 0, fx: 0, fy: 0 };
+    // Look pad is rate-based: holding the finger offset from where it landed
+    // keeps turning (the sustained smooth turn surfing needs), instead of
+    // stopping the instant a delta-drag pauses.
+    this._tLook = { id: null, ax: 0, ay: 0, dx: 0, dy: 0 };
     this.tJump = false; this.tDuck = false;
     this._onActive = [];
     this._onRespawn = [];
@@ -85,11 +88,19 @@ export class Input {
     if (this.isTouch) this._setupTouch(canvas);
   }
 
-  // Virtual joystick (left half = move) + drag-to-look (right half) + buttons.
+  // Virtual joystick (left half = move) + rate-based look pad (right half) +
+  // buttons. The joystick anchors where the thumb lands and follows it; the
+  // look pad turns continuously while held off-centre (so a surf turn can be
+  // sustained with one steady thumb rather than repeated swipes).
   _setupTouch(canvas) {
     const layer = document.getElementById('touch');
     if (layer) layer.style.display = 'block';
     const half = () => window.innerWidth / 2;
+    const R = 64;          // joystick max throw (px) — larger = finer control
+    const stick = document.getElementById('t-stickhint');
+    const dot = stick && stick.querySelector('.dot');
+    const placeStick = (x, y) => { if (stick) { stick.style.left = (x - 60) + 'px'; stick.style.top = (y - 60) + 'px'; stick.style.bottom = 'auto'; } };
+    const moveDot = (dx, dy) => { if (dot) dot.style.transform = `translate(${dx}px,${dy}px)`; };
 
     const onStart = (e) => {
       if (!this.active) this.start();
@@ -97,8 +108,10 @@ export class Input {
         if (t.target && t.target.dataset && t.target.dataset.btn) continue; // buttons handle themselves
         if (t.clientX < half() && this._tMove.id == null) {
           this._tMove.id = t.identifier; this._tMove.ox = t.clientX; this._tMove.oy = t.clientY; this._tMove.fx = 0; this._tMove.fy = 0;
+          placeStick(t.clientX, t.clientY); moveDot(0, 0);
+          if (stick) stick.style.opacity = '0.9';
         } else if (this._tLook.id == null) {
-          this._tLook.id = t.identifier; this._tLook.x = t.clientX; this._tLook.y = t.clientY;
+          this._tLook.id = t.identifier; this._tLook.ax = t.clientX; this._tLook.ay = t.clientY; this._tLook.dx = 0; this._tLook.dy = 0;
         }
       }
       e.preventDefault();
@@ -106,23 +119,28 @@ export class Input {
     const onMove = (e) => {
       for (const t of e.changedTouches) {
         if (t.identifier === this._tMove.id) {
-          const dx = t.clientX - this._tMove.ox, dy = t.clientY - this._tMove.oy;
-          this._tMove.fx = Math.max(-1, Math.min(1, dx / 55));
-          this._tMove.fy = Math.max(-1, Math.min(1, dy / 55));
+          let dx = t.clientX - this._tMove.ox, dy = t.clientY - this._tMove.oy;
+          const len = Math.hypot(dx, dy);
+          if (len > R) { dx *= R / len; dy *= R / len; } // clamp thumb to ring
+          moveDot(dx, dy);
+          let fx = Math.max(-1, Math.min(1, dx / R));
+          let fy = Math.max(-1, Math.min(1, dy / R));
+          // Surf aid: snap a clearly dominant axis to a pure strafe / pure
+          // forward "lane" so air-strafing holds a clean ±side with no drift.
+          if (Math.abs(fx) > Math.abs(fy) * 2) fy = 0;
+          else if (Math.abs(fy) > Math.abs(fx) * 2) fx = 0;
+          this._tMove.fx = fx; this._tMove.fy = fy;
         } else if (t.identifier === this._tLook.id) {
-          this.yaw -= (t.clientX - this._tLook.x) * this.touchSens;
-          this.pitch += (t.clientY - this._tLook.y) * this.touchSens * (this.invertY ? -1 : 1);
-          const lim = (89 * Math.PI) / 180;
-          this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
-          this._tLook.x = t.clientX; this._tLook.y = t.clientY;
+          this._tLook.dx = t.clientX - this._tLook.ax;
+          this._tLook.dy = t.clientY - this._tLook.ay;
         }
       }
       e.preventDefault();
     };
     const onEnd = (e) => {
       for (const t of e.changedTouches) {
-        if (t.identifier === this._tMove.id) { this._tMove.id = null; this._tMove.fx = 0; this._tMove.fy = 0; }
-        if (t.identifier === this._tLook.id) this._tLook.id = null;
+        if (t.identifier === this._tMove.id) { this._tMove.id = null; this._tMove.fx = 0; this._tMove.fy = 0; moveDot(0, 0); if (stick) stick.style.opacity = '0.5'; }
+        if (t.identifier === this._tLook.id) { this._tLook.id = null; this._tLook.dx = 0; this._tLook.dy = 0; }
       }
     };
     canvas.addEventListener('touchstart', onStart, { passive: false });
@@ -169,6 +187,25 @@ export class Input {
       const p = this.canvas.requestPointerLock();
       if (p && typeof p.catch === 'function') p.catch(() => { /* lock unavailable; fallback look still works */ });
     } catch { /* lock unavailable */ }
+  }
+
+  // Apply the touch look pad's continuous turn rate. Called once per rendered
+  // frame with the frame's dt so turning speed is framerate-independent. The
+  // further the thumb is held from where it landed, the faster the view turns;
+  // a small deadzone keeps a resting thumb from drifting.
+  tickLook(dt) {
+    if (this._tLook.id == null || !this.active || this.chatting) return;
+    const dead = 7; // px
+    const rate = this.sensitivity * 16; // rad/sec per px, scaled by the sens slider
+    const dx = this._tLook.dx, dy = this._tLook.dy;
+    if (Math.abs(dx) > dead) this.yaw -= (dx - Math.sign(dx) * dead) * rate * dt;
+    if (Math.abs(dy) > dead) this.pitch += (dy - Math.sign(dy) * dead) * rate * dt * (this.invertY ? -1 : 1);
+    const lim = (89 * Math.PI) / 180;
+    if (this.pitch > lim) this.pitch = lim;
+    if (this.pitch < -lim) this.pitch = -lim;
+    const TwoPi = Math.PI * 2;
+    if (this.yaw > Math.PI) this.yaw -= TwoPi;
+    if (this.yaw < -Math.PI) this.yaw += TwoPi;
   }
 
   onActiveChange(fn) { this._onActive.push(fn); }

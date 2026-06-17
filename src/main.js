@@ -447,6 +447,7 @@ function frame(nowMs) {
   lastT = now;
   if (dt > 0.25) dt = 0.25; // avoid spiral-of-death after a tab stall
   if (dt > 0) fpsEMA += ((1 / dt) - fpsEMA) * 0.1;
+  if (input.tickLook) input.tickLook(dt); // touch look pad: continuous rate-based turn
   accumulator += dt;
 
   let steps = 0;
@@ -916,6 +917,8 @@ async function boot() {
       setState: (o, v) => { if (o) state.origin = [...o]; if (v) state.velocity = [...v]; prevOrigin = copy(state.origin); },
       setAir: () => { state.onground = false; state.groundNormal = null; },
       setLook: (yaw, pitch) => { input.yaw = yaw; input.pitch = pitch; },
+      getLook: () => ({ yaw: input.yaw, pitch: input.pitch }),
+      getCommand: () => input.command(),
       setVMEuler: (x, y, z) => viewmodel && viewmodel.setVMEuler(x, y, z),
       vmReady: () => !!(viewmodel && Object.keys(viewmodel.weapons).length),
       selectWeapon: (n) => { if (input) input.weapon = n; if (viewmodel) viewmodel.select(n); },
