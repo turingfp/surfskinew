@@ -17,6 +17,10 @@ import { Input } from './input.js';
 import { HUD } from './hud.js';
 import { FIXED_DT, HULL, CONTENTS, CVAR } from './constants.js';
 import { angleVectors, copy } from './vec.js';
+import { inject } from '@vercel/analytics';
+
+// Initialize Vercel Analytics
+inject();
 
 const statusEl = document.getElementById('status');
 const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };

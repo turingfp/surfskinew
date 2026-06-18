@@ -12,5 +12,8 @@
     "gen-texture": "node tools/gen_texture.mjs"
   },
   "license": "MIT",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@vercel/analytics": "^2.0.1"
+  }
 }
