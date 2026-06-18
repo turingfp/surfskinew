@@ -14,6 +14,14 @@
 import * as THREE from '../vendor/three.module.js';
 import { dot } from './vec.js';
 
+// Max anisotropy of the active renderer. Set once at boot (setMaxAnisotropy);
+// applied to every world texture so floors/ramps don't moiré into "weird
+// lines" at grazing viewing angles — anisotropic filtering is what makes a
+// high-frequency texture like snow read cleanly when minified toward the
+// horizon.
+let maxAniso = 1;
+export function setMaxAnisotropy(n) { maxAniso = Math.max(1, n | 0); }
+
 // GoldSrc unit -> Three position. Z-up to Y-up.
 export const gs2three = (x, y, z) => [x, z, -y];
 
@@ -46,14 +54,33 @@ function nameColor(name) {
   return c;
 }
 
+// Embedded miptex -> texture. GoldSrc textures are usually non-power-of-two
+// (e.g. snow is 240x240), and three.js won't reliably build a full mip chain
+// for an NPOT DataTexture — without mips, anisotropic filtering has nothing to
+// sample and a high-frequency floor texture moirés into "weird lines" toward
+// the horizon. Drawing the pixels into a power-of-two canvas guarantees a clean
+// mip chain on every GL backend; wrapping repeats it across the surface as
+// before.
 function embeddedTexture(tex) {
-  const data = new Uint8Array(tex.rgba); // already RGBA
-  const t = new THREE.DataTexture(data, tex.width, tex.height, THREE.RGBAFormat);
+  const w = tex.width, h = tex.height;
+  const src = document.createElement('canvas'); src.width = w; src.height = h;
+  const sctx = src.getContext('2d');
+  const img = sctx.createImageData(w, h); img.data.set(tex.rgba); sctx.putImageData(img, 0, 0);
+  const pw = Math.min(1024, nextPow2(w)), ph = Math.min(1024, nextPow2(h));
+  let canvas = src;
+  if (pw !== w || ph !== h) {
+    canvas = document.createElement('canvas'); canvas.width = pw; canvas.height = ph;
+    const c = canvas.getContext('2d');
+    c.imageSmoothingEnabled = true;
+    c.drawImage(src, 0, 0, pw, ph);
+  }
+  const t = new THREE.CanvasTexture(canvas);
   t.wrapS = THREE.RepeatWrapping;
   t.wrapT = THREE.RepeatWrapping;
-  t.magFilter = THREE.NearestFilter;
+  t.magFilter = THREE.NearestFilter; // crisp GoldSrc look up close
   t.minFilter = THREE.LinearMipmapLinearFilter;
   t.generateMipmaps = true;
+  t.anisotropy = maxAniso;
   t.colorSpace = THREE.SRGBColorSpace;
   t.needsUpdate = true;
   return t;
@@ -62,15 +89,17 @@ function embeddedTexture(tex) {
 // Unlit base × lightmap, the authentic GoldSrc shading (lightMap uses uv1).
 function materialFor(tex, fallbacks, lightMap, wadTex) {
   const masked = tex.masked;
-  const common = lightMap ? { lightMap, lightMapIntensity: 2.2 } : {};
+  const common = lightMap ? { lightMap, lightMapIntensity: 1.0 } : {};
   const name = (tex.name || 'world').toLowerCase();
   let mat;
   if (tex.embedded && tex.rgba) { // 1. embedded in the BSP
     mat = new THREE.MeshBasicMaterial({ map: embeddedTexture(tex), transparent: masked, alphaTest: masked ? 0.5 : 0, side: THREE.DoubleSide, ...common });
   } else if (wadTex && wadTex.has(name)) { // 2. from a WAD
-    mat = new THREE.MeshBasicMaterial({ map: wadTex.get(name), transparent: masked, alphaTest: masked ? 0.5 : 0, side: THREE.DoubleSide, ...common });
+    const wm = wadTex.get(name); wm.anisotropy = maxAniso;
+    mat = new THREE.MeshBasicMaterial({ map: wm, transparent: masked, alphaTest: masked ? 0.5 : 0, side: THREE.DoubleSide, ...common });
   } else if (fallbacks && fallbacks.length) { // 3. CC0 Kenney fallback
     const map = fallbacks[nameHash(name) % fallbacks.length].clone();
+    map.anisotropy = maxAniso;
     map.needsUpdate = true;
     mat = new THREE.MeshBasicMaterial({ map, color: nameColor(name).lerp(new THREE.Color(0xffffff), 0.7), side: THREE.DoubleSide, ...common });
   } else {
@@ -155,6 +184,13 @@ export function buildLevel(bsp, { fallbackTextures = [], wadTextures = null } = 
   }
 
   // ---- Build the atlas texture (white background; copy luxels) ----
+  // GoldSrc bakes one small lightmap per face. On big surfaces split into many
+  // tiled faces (e.g. surf_ski_2's snow ground) each face is nearly uniform but
+  // a step brighter/darker than its neighbour, so the seams read as a harsh
+  // patchwork / "weird lines" at grazing angles. Soften each luxel toward white
+  // (keep only LM_SHADOW of the shadow depth) so the steps collapse into clean,
+  // evenly-lit surfaces while a hint of baked shading remains.
+  const LM_SHADOW = 0.2;
   let lightMap = null;
   if (atlasH > 0 && recs.some((r) => r.lm)) {
     const data = new Uint8Array(ATLAS_W * atlasH * 4).fill(255);
@@ -166,8 +202,10 @@ export function buildLevel(bsp, { fallbackTextures = [], wadTextures = null } = 
           const src = ofs + (ty * w + tx) * 3;
           const dx = r.tile.x + tx, dy = r.tile.y + ty;
           const d = (dy * ATLAS_W + dx) * 4;
-          data[d] = bsp.lighting[src]; data[d + 1] = bsp.lighting[src + 1];
-          data[d + 2] = bsp.lighting[src + 2]; data[d + 3] = 255;
+          data[d] = 255 - (255 - bsp.lighting[src]) * LM_SHADOW;
+          data[d + 1] = 255 - (255 - bsp.lighting[src + 1]) * LM_SHADOW;
+          data[d + 2] = 255 - (255 - bsp.lighting[src + 2]) * LM_SHADOW;
+          data[d + 3] = 255;
         }
       }
     }

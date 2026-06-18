@@ -4,7 +4,7 @@
 import * as THREE from '../vendor/three.module.js';
 import { loadBSP } from './bsp.js';
 import { CollisionWorld } from './hull.js';
-import { buildLevel, buildProcLevel, buildWorldModel, buildSky, gs2three } from './render.js';
+import { buildLevel, buildProcLevel, buildWorldModel, buildSky, gs2three, setMaxAnisotropy } from './render.js';
 import { generateSurfArena, BrushWorld } from './procmap.js';
 import { loadMDL } from './mdl.js';
 import { createPlayerState, runTick, speed2d, waterMove, ladderMove } from './physics.js';
@@ -28,6 +28,10 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.autoClear = false; // we clear manually to overlay the weapon viewmodel
 renderer.info.autoReset = false; // accumulate stats across both passes per frame
+// Anisotropic filtering keeps floor/ramp textures crisp at grazing angles
+// instead of moiréing into "weird lines"; applied to every world texture.
+const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
+setMaxAnisotropy(MAX_ANISO);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xbfd2e6);
@@ -82,6 +86,7 @@ function makeGridTexture() {
   g.lineWidth = 4; g.strokeRect(0, 0, s, s);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = MAX_ANISO;
   t.colorSpace = THREE.SRGBColorSpace;
   // BSP UVs are in pixels/texWidth; a 64px-equivalent repeat reads well.
   t.repeat.set(1, 1);
@@ -98,6 +103,7 @@ async function tryLoadTexture(url) {
     const bmp = await createImageBitmap(blob);
     const t = new THREE.Texture(bmp);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = MAX_ANISO;
     t.colorSpace = THREE.SRGBColorSpace;
     t.needsUpdate = true;
     return t;
@@ -905,6 +911,7 @@ async function boot() {
     // without pointer lock. Harmless in normal play.
     window.__surf = {
       ready: true,
+      scene, // test hook: inspect/tweak materials for visual diagnosis
       stats,
       bounds,
       spawn,
