@@ -4,7 +4,7 @@
 import * as THREE from '../vendor/three.module.js';
 import { loadBSP } from './bsp.js';
 import { CollisionWorld } from './hull.js';
-import { buildLevel, buildProcLevel, buildWorldModel, buildSky, gs2three, setMaxAnisotropy } from './render.js';
+import { buildLevel, buildProcLevel, buildWorldModel, buildSky, gs2three, setMaxAnisotropy, makeWorldTexture } from './render.js';
 import { generateSurfArena, BrushWorld } from './procmap.js';
 import { loadMDL } from './mdl.js';
 import { createPlayerState, runTick, speed2d, waterMove, ladderMove } from './physics.js';
@@ -95,18 +95,15 @@ function makeGridTexture() {
 
 // Prefer a shipped prototype texture (e.g. a CC0 Kenney grid) if one exists.
 // fetch-based so a missing optional asset doesn't spam the console with 404s.
+// Goes through makeWorldTexture so WAD floors get POT dimensions + an explicit
+// mip chain — without it, NPOT textures alias into "weird lines" on iOS/WebGL1.
 async function tryLoadTexture(url) {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
     const blob = await res.blob();
     const bmp = await createImageBitmap(blob);
-    const t = new THREE.Texture(bmp);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.anisotropy = MAX_ANISO;
-    t.colorSpace = THREE.SRGBColorSpace;
-    t.needsUpdate = true;
-    return t;
+    return makeWorldTexture(bmp);
   } catch {
     return null;
   }

@@ -66,24 +66,56 @@ function embeddedTexture(tex) {
   const src = document.createElement('canvas'); src.width = w; src.height = h;
   const sctx = src.getContext('2d');
   const img = sctx.createImageData(w, h); img.data.set(tex.rgba); sctx.putImageData(img, 0, 0);
+  return makeWorldTexture(src);
+}
+
+// Build a repeat-wrapped, mip-mapped world texture from any image/canvas source.
+// Forces power-of-two dimensions and supplies an explicit box-filtered mip chain
+// rather than relying on the GPU's glGenerateMipmap: NPOT textures (e.g. an
+// 80x64 WAD floor) can't mipmap or repeat on iOS/WebGL1 and otherwise alias into
+// "weird lines" at grazing angles, and auto-mip quality varies by backend.
+export function makeWorldTexture(img, { srgb = true } = {}) {
+  const w = img.width, h = img.height;
   const pw = Math.min(1024, nextPow2(w)), ph = Math.min(1024, nextPow2(h));
-  let canvas = src;
-  if (pw !== w || ph !== h) {
+  let canvas;
+  if (typeof HTMLCanvasElement !== 'undefined' && img instanceof HTMLCanvasElement && pw === w && ph === h) {
+    canvas = img; // already a POT canvas — use directly
+  } else {
     canvas = document.createElement('canvas'); canvas.width = pw; canvas.height = ph;
     const c = canvas.getContext('2d');
-    c.imageSmoothingEnabled = true;
-    c.drawImage(src, 0, 0, pw, ph);
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(img, 0, 0, pw, ph);
   }
   const t = new THREE.CanvasTexture(canvas);
   t.wrapS = THREE.RepeatWrapping;
   t.wrapT = THREE.RepeatWrapping;
   t.magFilter = THREE.NearestFilter; // crisp GoldSrc look up close
   t.minFilter = THREE.LinearMipmapLinearFilter;
-  t.generateMipmaps = true;
   t.anisotropy = maxAniso;
-  t.colorSpace = THREE.SRGBColorSpace;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.mipmaps = buildMipChain(canvas);
+  t.generateMipmaps = false;
   t.needsUpdate = true;
   return t;
+}
+
+// Downscale a canvas to a full mip chain (level 0 = source, down to 1x1). Each
+// level is the previous one redrawn at half size with bilinear smoothing, so
+// high-frequency detail (snow, concrete) averages toward a clean colour when
+// minified instead of shimmering.
+function buildMipChain(base) {
+  const mips = [base];
+  let prev = base, w = base.width, h = base.height;
+  while (w > 1 || h > 1) {
+    w = Math.max(1, w >> 1); h = Math.max(1, h >> 1);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const cx = c.getContext('2d');
+    cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'high';
+    cx.drawImage(prev, 0, 0, w, h);
+    mips.push(c);
+    prev = c;
+  }
+  return mips;
 }
 
 // Unlit base × lightmap, the authentic GoldSrc shading (lightMap uses uv1).
@@ -260,6 +292,7 @@ export function buildLevel(bsp, { fallbackTextures = [], wadTextures = null } = 
     geo.setIndex(bucket.indices);
     const mesh = new THREE.Mesh(geo, materialFor(bucket.tex, fallbackTextures, lightMap, wadTextures));
     mesh.frustumCulled = true;
+    mesh.userData.texName = bucket.tex.name || '';
     group.add(mesh);
   }
 
