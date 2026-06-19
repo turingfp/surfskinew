@@ -356,14 +356,18 @@ export function buildWorldModel(data, { center = true } = {}) {
     const m = new THREE.Mesh(geo, mat); m.frustumCulled = false;
     group.add(m);
   }
+  // Lowest point of the model relative to the group origin, so callers can rest
+  // it on a floor. A CS player MDL's origin sits around the hips (not the feet),
+  // so this is needed to place feet correctly — without it the avatar sinks into
+  // the floor on every map.
+  const box = new THREE.Box3().setFromObject(group);
   if (center) {
     // centre on the bbox so it rotates about itself (weapon pickups)
-    const box = new THREE.Box3().setFromObject(group);
     const c = box.getCenter(new THREE.Vector3());
     group.children.forEach((m) => m.position.sub(c));
-    // distance from the (now centred) origin down to the model's lowest point,
-    // so callers can rest it on a floor (negative; in unscaled model units).
     group.userData.modelMinY = box.min.y - c.y;
+  } else {
+    group.userData.modelMinY = box.min.y;
   }
   return group;
 }

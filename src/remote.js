@@ -39,7 +39,11 @@ export class RemotePlayers {
     let body;
     if (this.template) {
       body = this.template.clone(true);
-      body.position.y = -36; // feet 36u below the player centre
+      // Rest the model's feet on the hull bottom (36u below the player centre).
+      // The MDL origin is near the hips, so offset by its lowest point instead
+      // of assuming feet-at-origin (otherwise the avatar sinks into the floor).
+      const minY = typeof body.userData.modelMinY === 'number' ? body.userData.modelMinY : -36;
+      body.position.y = -36 - minY;
     } else {
       // fallback avatar (capsule + head)
       body = new THREE.Group();
