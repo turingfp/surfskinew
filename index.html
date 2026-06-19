@@ -44,6 +44,17 @@
   #hitmarker::before{ left:8px; top:0; width:2px; height:18px; }
   #hitmarker::after{ top:8px; left:0; height:2px; width:18px; }
 
+  /* Sniper scope: black surround with a circular lens + thin crosshair lines */
+  #scope { position:fixed; inset:0; z-index:7; pointer-events:none; display:none;
+    background:radial-gradient(circle at center,
+      rgba(0,0,0,0) calc(min(46vw,46vh) - 1px),
+      rgba(0,0,0,0.985) calc(min(46vw,46vh)));
+  }
+  #scope.on { display:block; }
+  #scope .ln { position:absolute; background:rgba(0,0,0,0.9); }
+  #scope .lh { left:0; right:0; top:50%; height:1px; transform:translateY(-0.5px); }
+  #scope .lv { top:0; bottom:0; left:50%; width:1px; transform:translateX(-0.5px); }
+
   .hud { position:fixed; z-index:6; pointer-events:none; text-shadow:0 2px 6px rgba(0,0,0,0.8); }
 
   /* Bottom-left: speed + state (the surf core) */
@@ -181,6 +192,7 @@
   <div id="crosshair">
     <i class="v up"></i><i class="v dn"></i><i class="h lf"></i><i class="h rt"></i>
   </div>
+  <div id="scope"><span class="ln lh"></span><span class="ln lv"></span></div>
   <div id="hitmarker"></div>
   <div id="toast"></div>
   <div id="usePrompt"></div>
@@ -203,6 +215,7 @@
     <div id="t-stickhint"><div class="ring"></div><div class="dot"></div></div>
     <div id="t-buttons">
       <button id="t-weapon" data-btn="1" type="button">WPN</button>
+      <button id="t-scope" data-btn="1" type="button">SCOPE</button>
       <button id="t-reload" data-btn="1" type="button">R</button>
       <button id="t-duck" data-btn="1" type="button">DUCK</button>
       <button id="t-jump" data-btn="1" type="button">JUMP</button>

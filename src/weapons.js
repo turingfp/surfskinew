@@ -36,8 +36,8 @@ const SPECS = {
   sg552: spec({ label: 'SG552', sound: 'sg552', rate: 0.09, auto: true, kick: 0.6, spread: 0.025, dmg: 30, clip: 30, reserve: 90, reload: 3.0, rld: 'rifle' }),
   aug: spec({ label: 'AUG', sound: 'aug', rate: 0.09, auto: true, kick: 0.5, spread: 0.022, dmg: 28, clip: 30, reserve: 90, reload: 3.3, rld: 'rifle' }),
   // snipers (semi)
-  scout: spec({ label: 'SCOUT', sound: 'scout', rate: 1.25, auto: false, kick: 1.2, spread: 0.002, dmg: 75, clip: 10, reserve: 90, reload: 2.0, rld: 'sniper', tracer: 0x9fd0ff }),
-  awp: spec({ label: 'AWP', sound: 'awp', rate: 1.5, auto: false, kick: 1.5, spread: 0.001, dmg: 115, clip: 10, reserve: 30, reload: 3.0, rld: 'sniper', tracer: 0x9fd0ff }),
+  scout: spec({ label: 'SCOUT', sound: 'scout', rate: 1.25, auto: false, kick: 1.2, spread: 0.002, dmg: 75, clip: 10, reserve: 90, reload: 2.0, rld: 'sniper', tracer: 0x9fd0ff, zoom: [40] }),
+  awp: spec({ label: 'AWP', sound: 'awp', rate: 1.5, auto: false, kick: 1.5, spread: 0.001, dmg: 115, clip: 10, reserve: 30, reload: 3.0, rld: 'sniper', tracer: 0x9fd0ff, zoom: [40, 10] }),
   g3sg1: spec({ label: 'G3SG1', sound: 'g3sg1', rate: 0.25, auto: false, kick: 0.9, spread: 0.01, dmg: 40, clip: 20, reserve: 90, reload: 3.5, rld: 'sniper', tracer: 0x9fd0ff }),
   // shotguns (pellets)
   m3: spec({ label: 'M3', sound: 'm3', rate: 0.8, auto: false, kick: 1.1, spread: 0.07, pellets: 8, dmg: 11, clip: 8, reserve: 32, reload: 2.6, rld: 'shotgun', tracer: 0xffd890 }),
@@ -155,6 +155,28 @@ export class Weapons {
     }
   }
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
+
+  // Zoomed-in horizontal FOVs for the current weapon (snipers), or null. Each
+  // right-click cycles through these and back to unzoomed.
+  getZoomFovs() { return SPECS[this.current] && SPECS[this.current].zoom ? SPECS[this.current].zoom : null; }
+
+  // Synthesized scope-toggle click (no extra audio asset to ship): a short
+  // rising square blip that reads as the sniper-scope "zoom" sound.
+  playZoom() {
+    if (!this.ctx) return;
+    this.resume();
+    const ctx = this.ctx, t0 = ctx.currentTime;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'square';
+    o.frequency.setValueAtTime(820, t0);
+    o.frequency.exponentialRampToValueAtTime(1500, t0 + 0.05);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.22 * this.masterVol + 0.0001, t0 + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07);
+    o.connect(g).connect(ctx.destination);
+    o.start(t0); o.stop(t0 + 0.08);
+  }
+
   _playRaw(name, vol) {
     if (!this.ctx || !this.buffers[name]) return;
     this.resume();

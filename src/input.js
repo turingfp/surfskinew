@@ -15,6 +15,7 @@ export class Input {
     this.yaw = 0;       // radians, +yaw turns left (toward +Y)
     this.pitch = 0;     // radians, clamped to +/-89 deg
     this.sensitivity = 0.0022; // radians per mouse pixel
+    this.lookScale = 1;        // <1 while scoped, so zoomed aim stays steady
     this.invertY = false;      // mouse-up looks up by default
     this.active = false;       // game is in play (overlay hidden)
     this.locked = false;       // pointer lock is actually held
@@ -33,6 +34,8 @@ export class Input {
     // stopping the instant a delta-drag pauses.
     this._tLook = { id: null, ax: 0, ay: 0, dx: 0, dy: 0 };
     this.tJump = false; this.tDuck = false;
+    this.attack = false; this.attack2 = false;
+    this.scopeTap = false; // one-shot: a touch SCOPE tap (main consumes + clears)
     this._onActive = [];
     this._onRespawn = [];
     this._onReload = [];
@@ -54,10 +57,11 @@ export class Input {
 
     document.addEventListener('mousemove', (e) => {
       if (!this.active || this.chatting) return;
-      this.yaw -= e.movementX * this.sensitivity;
+      const sens = this.sensitivity * this.lookScale;
+      this.yaw -= e.movementX * sens;
       // +pitch looks down in our convention, so mouse-up (movementY<0) must
       // increase-toward-up => pitch += movementY for the non-inverted default.
-      this.pitch += e.movementY * this.sensitivity * (this.invertY ? -1 : 1);
+      this.pitch += e.movementY * sens * (this.invertY ? -1 : 1);
       const lim = (89 * Math.PI) / 180;
       if (this.pitch > lim) this.pitch = lim;
       if (this.pitch < -lim) this.pitch = -lim;
@@ -160,6 +164,7 @@ export class Input {
     hold('t-jump', () => { this.tJump = true; }, () => { this.tJump = false; });
     hold('t-duck', () => { this.tDuck = true; }, () => { this.tDuck = false; });
     hold('t-reload', () => { this._onReload.forEach((f) => f()); });
+    hold('t-scope', () => { this.scopeTap = true; });
     hold('t-weapon', () => {
       const order = ['usp', 'deagle', 'm4a1', 'ak47', 'awp', 'm3'];
       this.weapon = order[(order.indexOf(this.weapon) + 1) % order.length];

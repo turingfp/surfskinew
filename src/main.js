@@ -174,6 +174,14 @@ const PB_SPEED_KEY = `surf_pbspeed_${MAP_NAME}`;
 let pbTime = Number(localStorage.getItem(PB_TIME_KEY)) || null;
 let pbSpeed = Number(localStorage.getItem(PB_SPEED_KEY)) || 0;
 
+// Sniper scope (scout/awp): right-click cycles zoom levels. effectiveFov is the
+// horizontal FOV actually rendered — SETTINGS.fov when hip-firing, the weapon's
+// zoom FOV while scoped.
+let scopeLevel = 0, prevAttack2 = false, prevScopeWeapon = null;
+let effectiveFov = SETTINGS.fov;
+const scopeEl = document.getElementById('scope');
+const crosshairEl = document.getElementById('crosshair');
+
 // multiplayer identity + combat stats
 let playerName = localStorage.getItem('surf_name') || `Surfer${Math.floor(1000 + Math.random() * 9000)}`;
 let health = 100, kills = 0, deaths = 0;
@@ -280,6 +288,7 @@ function respawn() {
   prevOrigin = copy(state.origin);
   runTime = 0; runStarted = false; finishTime = null;
   health = 100;
+  scopeLevel = 0; // drop the scope on (re)spawn
   if (hud) hud.peak = 0;
 }
 
@@ -432,15 +441,44 @@ function updateCamera(renderOrigin, pitch) {
   camera.lookAt(ex + fx, ey + fy, ez + fz);
 }
 
+// Set the camera's vertical FOV from effectiveFov (a horizontal FOV), keeping
+// the chosen horizontal angle regardless of aspect ratio.
+function applyFov() {
+  const aspect = camera.aspect || (window.innerWidth / window.innerHeight);
+  const hfov = (effectiveFov * Math.PI) / 180;
+  camera.fov = (2 * Math.atan(Math.tan(hfov / 2) / aspect) * 180) / Math.PI;
+  camera.updateProjectionMatrix();
+}
+
 function onResize() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h, false);
-  const aspect = w / h;
-  // keep the chosen horizontal FOV regardless of aspect
-  const hfov = (SETTINGS.fov * Math.PI) / 180;
-  camera.fov = (2 * Math.atan(Math.tan(hfov / 2) / aspect) * 180) / Math.PI;
-  camera.aspect = aspect;
-  camera.updateProjectionMatrix();
+  camera.aspect = w / h;
+  if (scopeLevel === 0) effectiveFov = SETTINGS.fov; // unscoped tracks the setting
+  applyFov();
+}
+
+// Right-click (attack2) cycles the current sniper's zoom levels and back to
+// hip-fire; switching weapons drops the scope. Drives FOV, look sensitivity,
+// the scope overlay, and (in the render pass) hiding the viewmodel.
+function updateScope() {
+  const zfovs = weapons.getZoomFovs();
+  if (input.weapon !== prevScopeWeapon) { scopeLevel = 0; prevScopeWeapon = input.weapon; }
+  if (!zfovs) scopeLevel = 0;
+  const a2 = !!input.attack2 && input.active;
+  const tap = input.scopeTap; input.scopeTap = false; // touch SCOPE one-shot
+  if (((a2 && !prevAttack2) || tap) && zfovs) {
+    scopeLevel = (scopeLevel + 1) % (zfovs.length + 1);
+    weapons.playZoom();
+  }
+  prevAttack2 = a2;
+
+  const wantFov = (scopeLevel > 0 && zfovs) ? zfovs[scopeLevel - 1] : SETTINGS.fov;
+  if (wantFov !== effectiveFov) { effectiveFov = wantFov; applyFov(); }
+  input.lookScale = (scopeLevel > 0) ? (effectiveFov / SETTINGS.fov) : 1;
+
+  if (scopeEl) scopeEl.classList.toggle('on', scopeLevel > 0);
+  if (crosshairEl) crosshairEl.style.visibility = scopeLevel > 0 ? 'hidden' : '';
 }
 
 // ---- Main loop -------------------------------------------------------------
@@ -489,6 +527,7 @@ function frame(nowMs) {
       yaw: input.yaw,
       pitch: pitchEff,
     });
+    updateScope();
   }
   // health regen: disabled in active deathmatch, slow otherwise
   if (health < 100) {
@@ -539,8 +578,8 @@ function frame(nowMs) {
   renderer.clear();
   renderer.render(scene, camera);
 
-  // overlay pass: the first-person weapon viewmodel
-  if (viewmodel && viewmodel.current) {
+  // overlay pass: the first-person weapon viewmodel (hidden while scoped)
+  if (viewmodel && viewmodel.current && scopeLevel === 0) {
     if (input) { ensureViewmodel(input.weapon); viewmodel.select(input.weapon); }
     viewmodel.setAspect(camera.aspect);
     viewmodel.update(dt, sp);
