@@ -159,6 +159,7 @@ const MAPS = {
   surf_sand: 'assets/maps/surf_sand.bsp',
   surf_egypt: 'assets/maps/surf_egypt.bsp',
   fy_pool_day: 'assets/maps/fy_pool_day.bsp',
+  de_dust2: 'assets/maps/de_dust2.bsp',
   surf_arena: 'proc', // procedurally generated (no BSP)
 };
 const mapParam = new URLSearchParams(location.search).get('map');
