@@ -809,6 +809,7 @@ async function boot() {
       awp_out: 'assets/sounds/awp_out.wav', awp_in: 'assets/sounds/awp_in.wav', awp_bolt: 'assets/sounds/awp_bolt.wav',
       shotgun_pump: 'assets/sounds/shotgun_pump.wav', shotgun_insert: 'assets/sounds/shotgun_insert.wav',
       empty: 'assets/sounds/empty.wav', draw: 'assets/sounds/draw.wav',
+      zoom: 'assets/sounds/zoom.wav',
     });
 
     // ---- P2P multiplayer (serverless WebRTC via Trystero) ----

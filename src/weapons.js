@@ -160,9 +160,10 @@ export class Weapons {
   // right-click cycles through these and back to unzoomed.
   getZoomFovs() { return SPECS[this.current] && SPECS[this.current].zoom ? SPECS[this.current].zoom : null; }
 
-  // Synthesized scope-toggle click (no extra audio asset to ship): a short
-  // rising square blip that reads as the sniper-scope "zoom" sound.
+  // Real CS scope-toggle "zoom" sample; falls back to a synthesized blip only
+  // if the asset failed to load.
   playZoom() {
+    if (this.buffers.zoom) { this._playRaw('zoom', 0.7); return; }
     if (!this.ctx) return;
     this.resume();
     const ctx = this.ctx, t0 = ctx.currentTime;
