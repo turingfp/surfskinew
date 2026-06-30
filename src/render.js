@@ -379,18 +379,20 @@ function remapModelArray(src) {
   return out;
 }
 
-// Build an *animated* player model from a parsed MDL. Returns { group, apply,
+// Build an *animated* model from a parsed MDL. Returns { group, apply,
 // modelMinY }. apply(seqIndex, fracFrame) deforms the geometry to that sequence
 // frame, interpolating between the two bracketing integer frames. Each call
-// builds its own geometry (so peers animate independently), but baked frames are
-// cached on the shared `data` so the per-peer cost is just a vertex lerp + copy.
-export function buildAnimatedModel(data) {
-  const cache = data._animCache || (data._animCache = new Map()); // "seq:frame" -> [{pos,nrm} per group] in three space
+// builds its own geometry (so instances animate independently), but baked frames
+// are cached (keyed by the remap) so the per-instance cost is just a vertex lerp.
+// `remap` converts a model-space float array to three space (default: player).
+export function buildAnimatedModel(data, { remap = remapModelArray } = {}) {
+  const caches = data._animCaches || (data._animCaches = new Map());
+  const cache = caches.get(remap) || (caches.set(remap, new Map()), caches.get(remap));
   function frame(seq, fr) {
     const key = seq + ':' + fr;
     let c = cache.get(key);
     if (!c) {
-      c = data.anim.bake(seq, fr).map((b) => ({ pos: remapModelArray(b.positions), nrm: remapModelArray(b.normals) }));
+      c = data.anim.bake(seq, fr).map((b) => ({ pos: remap(b.positions), nrm: remap(b.normals) }));
       cache.set(key, c);
     }
     return c;

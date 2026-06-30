@@ -5,6 +5,27 @@
 import * as THREE from '../vendor/three.module.js';
 import { GLTFLoader } from '../vendor/jsm/loaders/GLTFLoader.js';
 import { loadMDL } from './mdl.js';
+import { buildAnimatedModel } from './render.js';
+
+// v_ model axes -> view-model camera space: (x, y, z) -> (-x, z, y).
+function remapVM(src) {
+  const out = new Float32Array(src.length);
+  for (let i = 0; i < src.length; i += 3) { out[i] = -src[i]; out[i + 1] = src[i + 2]; out[i + 2] = src[i + 1]; }
+  return out;
+}
+
+// Resolve a v_ model's standard sequences by name (indices vary per weapon).
+function resolveSeqs(seqs) {
+  const find = (...names) => { for (const n of names) { const i = seqs.findIndex((s) => s.name === n); if (i >= 0) return i; } return -1; };
+  const shoot = seqs.map((s, i) => (/^shoot[0-9]?$/.test(s.name) ? i : -1)).filter((i) => i >= 0);
+  return {
+    idle: find('idle', 'idle1', 'idle2'),
+    shoot: shoot.length ? shoot : [find('shoot1', 'shoot')].filter((i) => i >= 0),
+    reload: find('reload', 'start_reload'),
+    draw: find('draw', 'deploy'),
+    seqs,
+  };
+}
 
 // Per-weapon nudge [x, y, z] in rig space, on top of the shared base placement.
 // Pistols (rhand bodypart skipped) end up sitting high after bbox-centering, so
@@ -53,6 +74,11 @@ export class Viewmodel {
     this.recoil = 0; // 0..1, decays; kicks the gun back + up when firing
     this.reloadT = 0; this.reloadDur = 0; // reload dip animation
     this._vmEuler = [0, 0, 0]; // fine-tune on top of the baked axis remap
+    // skeletal weapon animation state (current weapon): idle loop, or a one-shot
+    // shoot / reload / draw that returns to idle when it finishes.
+    this.anim = { mode: 'idle', seq: -1, frame: 0, fps: 16, loop: true, dur: 0 };
+    this.hasSkeletal = false;
+    this._pendingDur = 0;
 
     // Muzzle flash, rendered in this overlay at the current weapon's barrel tip
     // (so it appears at the gun, not at screen centre like a world-space flash).
@@ -84,9 +110,25 @@ export class Viewmodel {
     for (const w of Object.values(this.weapons)) if (w.rotation) w.rotation.set(x, y, z);
   }
 
-  kick(amount = 0.6) { this.recoil = Math.min(1.4, this.recoil + amount); }
+  kick(amount = 0.6) { this.recoil = Math.min(1.4, this.recoil + amount); this._startAnim('shoot'); }
 
-  startReload(dur) { this.reloadDur = dur; this.reloadT = dur; }
+  startReload(dur) { this.reloadDur = dur; this.reloadT = dur; this._pendingDur = dur; this._startAnim('reload'); }
+
+  // Start a skeletal sequence on the current weapon. shoot/reload/draw play once
+  // and return to the idle loop; missing sequences fall back to idle.
+  _startAnim(mode) {
+    const sx = this.weapons[this.current]?.userData.seqs;
+    if (!sx) { this.anim.seq = -1; return; }
+    let seq = -1, loop = false;
+    if (mode === 'shoot') seq = sx.shoot.length ? sx.shoot[(Math.random() * sx.shoot.length) | 0] : -1;
+    else if (mode === 'reload') seq = sx.reload;
+    else if (mode === 'draw') seq = sx.draw;
+    if (seq < 0) { seq = sx.idle; loop = true; mode = 'idle'; }
+    if (seq < 0) { this.anim.seq = -1; return; }
+    const sd = sx.seqs[seq];
+    this.anim = { mode, seq, frame: 0, fps: (sd && sd.fps) || 16, loop, dur: mode === 'reload' ? this._pendingDur : 0 };
+    this._pendingDur = 0;
+  }
 
   // Load real CS 1.6 StudioModel (.mdl) view models.
   has(name) { return !!this.weapons[name]; }
@@ -116,40 +158,14 @@ export class Viewmodel {
   }
 
   _makeMDLWeapon(data, name) {
-    const inner = new THREE.Group();
-    for (const g of data.groups) {
-      // The CS v_ models' long axis (barrel/arm) is model Y, up is model Z.
-      // Map to the view-model camera (looks -Z, +Y up): forward(-Y)->-Z,
-      // up(Z)->+Y, so three = (-X, Z, Y). A small wrap euler then fine-tunes.
-      const n = g.positions.length / 3;
-      const pos = new Float32Array(n * 3);
-      const nrm = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) {
-        const mx = g.positions[i * 3], my = g.positions[i * 3 + 1], mz = g.positions[i * 3 + 2];
-        pos[i * 3] = -mx; pos[i * 3 + 1] = mz; pos[i * 3 + 2] = my;
-        const ax = g.normals[i * 3], ay = g.normals[i * 3 + 1], az = g.normals[i * 3 + 2];
-        nrm[i * 3] = -ax; nrm[i * 3 + 1] = az; nrm[i * 3 + 2] = ay;
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
-      geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2));
-      let mat;
-      if (g.tex) {
-        const tex = new THREE.DataTexture(g.tex.rgba, g.tex.w, g.tex.h, THREE.RGBAFormat);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.needsUpdate = true;
-        mat = new THREE.MeshLambertMaterial({
-          map: tex, transparent: g.tex.masked, alphaTest: g.tex.masked ? 0.5 : 0, side: THREE.DoubleSide,
-        });
-      } else {
-        mat = new THREE.MeshLambertMaterial({ color: 0x888888 });
-      }
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.frustumCulled = false;
-      inner.add(mesh);
-    }
-    // center + scale + orient like a held first-person weapon
+    // Animated geometry: the CS v_ models' long axis (barrel/arm) is model Y, up
+    // is model Z. Map to the view-model camera (looks -Z, +Y up): three = (-X,
+    // Z, Y). A small wrap euler then fine-tunes. buildAnimatedModel drives the
+    // idle / shoot / reload / draw sequences by deforming this geometry.
+    const am = buildAnimatedModel(data, { remap: remapVM });
+    const inner = am.group;
+    inner.traverse((m) => { if (m.isMesh) m.frustumCulled = false; });
+    // center + scale + orient like a held first-person weapon (from the idle pose)
     const box = new THREE.Box3().setFromObject(inner);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
@@ -161,6 +177,8 @@ export class Viewmodel {
     wrap.rotation.set(this._vmEuler[0], this._vmEuler[1], this._vmEuler[2]);
     const off = VM_OFFSET[name];
     if (off) wrap.position.set(off[0], off[1], off[2]);
+    wrap.userData.anim = am;
+    wrap.userData.seqs = resolveSeqs(data.anim.sequences);
     wrap.userData.muzzle = computeMuzzle(wrap);
     return wrap;
   }
@@ -208,6 +226,7 @@ export class Viewmodel {
     if (!this.weapons[name] || this.current === name) return;
     for (const k of Object.keys(this.weapons)) this.weapons[k].visible = (k === name);
     this.current = name;
+    this._startAnim('draw'); // deploy animation on switch
   }
 
   // Subtle weapon bob proportional to movement speed.
@@ -215,11 +234,30 @@ export class Viewmodel {
     this.bobT += dt * (4 + Math.min(speed, 1500) / 180);
     const amp = 0.006 + Math.min(speed, 1500) / 1500 * 0.012;
     this.recoil = Math.max(0, this.recoil - dt * 6);
-    // reload dip: lower + tilt the gun, peaking mid-reload
+
+    // Skeletal weapon animation (idle loop + one-shot shoot/reload/draw).
+    const w = this.weapons[this.current];
+    const sx = w && w.userData.seqs;
+    this.hasSkeletal = !!(sx && w.userData.anim);
+    if (this.hasSkeletal) {
+      let a = this.anim;
+      if (a.seq < 0) { this._startAnim('idle'); a = this.anim; }
+      const sd = sx.seqs[a.seq];
+      const nf = sd ? Math.max(1, sd.numframes) : 1;
+      const fps = (a.mode === 'reload' && a.dur > 0) ? nf / a.dur : a.fps; // span the reload time
+      a.frame += dt * fps;
+      if (a.frame >= nf - 1) {
+        if (a.loop) a.frame %= nf;
+        else { this._startAnim('idle'); a = this.anim; }
+      }
+      w.userData.anim.apply(a.seq, a.frame);
+    }
+
+    // reload dip: only when the model can't reload itself (GLB fallback)
     let dip = 0;
     if (this.reloadT > 0) {
       this.reloadT = Math.max(0, this.reloadT - dt);
-      dip = Math.sin(Math.PI * (1 - this.reloadT / this.reloadDur));
+      if (!this.hasSkeletal) dip = Math.sin(Math.PI * (1 - this.reloadT / this.reloadDur));
     }
     this.rig.position.y = this.baseY + Math.sin(this.bobT) * amp - this.recoil * 0.01 - dip * 0.14;
     this.rig.position.x = this.baseX + Math.cos(this.bobT * 0.5) * amp * 0.6;
