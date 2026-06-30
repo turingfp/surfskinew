@@ -258,10 +258,8 @@ export class Weapons {
     if (this.onShot) this.onShot({ o: opts.eyeGS.slice(), y: opts.yaw, p: opts.pitch, w: this.current });
 
     const dirGS = angleVectors(opts.pitch, opts.yaw).forward;
-    const e3 = gs2three(opts.eyeGS[0], opts.eyeGS[1], opts.eyeGS[2]);
-    const d3 = gs2three(dirGS[0], dirGS[1], dirGS[2]);
-    this._flash.position.set(e3[0] + d3[0] * 36, e3[1] + d3[1] * 36, e3[2] + d3[2] * 36);
-    this._flashTtl = 0.04;
+    // muzzle flash at the gun barrel, drawn in the first-person overlay
+    if (this.vm) this.vm.flash();
 
     for (let i = 0; i < (spec.pellets || 1); i++) {
       const dir = spreadDir(dirGS, spec.spread);
@@ -290,6 +288,10 @@ export class Weapons {
     const spec = SPECS[data.w] || SPECS.pistol;
     this._playRaw(spec.sound, spec.vol * 0.4);
     const dirGS = angleVectors(data.p || 0, data.y || 0).forward;
+    // muzzle flash in the world at the remote shooter's barrel
+    const f3 = gs2three(data.o[0] + dirGS[0] * 20, data.o[1] + dirGS[1] * 20, data.o[2] + dirGS[2] * 20 - 6);
+    this._flash.position.set(f3[0], f3[1], f3[2]);
+    this._flashTtl = 0.04;
     const end = [data.o[0] + dirGS[0] * 8192, data.o[1] + dirGS[1] * 8192, data.o[2] + dirGS[2] * 8192];
     let hit = end; let normal = null;
     if (this.world) { const tr = this.world.traceBullet ? this.world.traceBullet(data.o, end) : this.world.traceHull(data.o, end, 1); if (tr.fraction < 1) { hit = tr.endpos; normal = tr.plane ? tr.plane.normal : null; } }

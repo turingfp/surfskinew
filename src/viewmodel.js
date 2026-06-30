@@ -13,6 +13,18 @@ const VM_OFFSET = {
   usp: [0, -0.13, 0.02], deagle: [0, -0.09, 0.01], glock: [0, -0.12, 0.02],
 };
 
+// Soft additive muzzle-flash sprite (no asset to ship).
+function makeFlashTexture() {
+  const s = 64; const c = document.createElement('canvas'); c.width = c.height = s;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  grad.addColorStop(0, 'rgba(255,250,210,1)');
+  grad.addColorStop(0.35, 'rgba(255,200,90,0.75)');
+  grad.addColorStop(1, 'rgba(255,150,40,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, s, s);
+  return new THREE.CanvasTexture(c);
+}
+
 export class Viewmodel {
   constructor() {
     this.scene = new THREE.Scene();
@@ -41,6 +53,29 @@ export class Viewmodel {
     this.recoil = 0; // 0..1, decays; kicks the gun back + up when firing
     this.reloadT = 0; this.reloadDur = 0; // reload dip animation
     this._vmEuler = [0, 0, 0]; // fine-tune on top of the baked axis remap
+
+    // Muzzle flash, rendered in this overlay at the current weapon's barrel tip
+    // (so it appears at the gun, not at screen centre like a world-space flash).
+    this._flash = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeFlashTexture(), transparent: true, depthTest: false, depthWrite: false,
+      blending: THREE.AdditiveBlending, opacity: 0,
+    }));
+    this._flash.scale.set(0.12, 0.12, 0.12);
+    this._flash.renderOrder = 1000;
+    this._flash.position.set(0, 0, -0.32);
+    this.rig.add(this._flash);
+    this._flashTtl = 0;
+  }
+
+  // Fire flash at the current weapon's muzzle (barrel tip in rig space).
+  flash() {
+    const w = this.weapons[this.current];
+    const mz = w && w.userData.muzzle;
+    if (mz) this._flash.position.set(mz.x, mz.y, mz.z);
+    this._flash.material.rotation = Math.random() * Math.PI;
+    const s = 0.1 + Math.random() * 0.06;
+    this._flash.scale.set(s, s, s);
+    this._flashTtl = 0.045;
   }
 
   // Re-orient all loaded MDL weapons (used to tune the view-model orientation).
@@ -126,6 +161,7 @@ export class Viewmodel {
     wrap.rotation.set(this._vmEuler[0], this._vmEuler[1], this._vmEuler[2]);
     const off = VM_OFFSET[name];
     if (off) wrap.position.set(off[0], off[1], off[2]);
+    wrap.userData.muzzle = computeMuzzle(wrap);
     return wrap;
   }
 
@@ -164,6 +200,7 @@ export class Viewmodel {
     // a touch of downward pitch and roll so it reads as held, not floating.
     inner.rotation.set(-0.05, Math.PI + 0.18, 0.04);
     obj.traverse((m) => { if (m.isMesh) m.frustumCulled = false; });
+    inner.userData.muzzle = computeMuzzle(inner);
     return inner;
   }
 
@@ -188,10 +225,25 @@ export class Viewmodel {
     this.rig.position.x = this.baseX + Math.cos(this.bobT * 0.5) * amp * 0.6;
     this.rig.position.z = -0.46 + this.recoil * 0.05;
     this.rig.rotation.x = -this.recoil * 0.18 + dip * 0.5;
+
+    // Show at full opacity the frame it fires, then fade — set opacity from the
+    // current TTL *before* decaying, so a single low-fps frame still shows it.
+    this._flash.material.opacity = this._flashTtl > 0 ? Math.min(1, this._flashTtl / 0.045) : 0;
+    if (this._flashTtl > 0) this._flashTtl -= dt;
   }
 
   setAspect(aspect) {
     this.camera.aspect = aspect;
     this.camera.updateProjectionMatrix();
   }
+}
+
+// Barrel tip of a built weapon group, in rig space: front-centre of its bbox.
+// The view models are oriented so the barrel points -Z, so the muzzle is the
+// most-forward (min Z) point at the bbox centre in X/Y.
+function computeMuzzle(group) {
+  group.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(group);
+  if (!isFinite(b.min.z)) return { x: 0, y: 0, z: -0.32 };
+  return { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: b.min.z - 0.02 };
 }
