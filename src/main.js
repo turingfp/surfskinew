@@ -561,7 +561,7 @@ function frame(nowMs) {
   });
 
   // multiplayer: interpolate remote avatars + broadcast our state at ~20 Hz
-  if (remotePlayers) remotePlayers.render();
+  if (remotePlayers) remotePlayers.render(dt);
   if (net && net.connected) {
     netAcc += dt;
     if (netAcc >= 0.05) {
@@ -816,7 +816,7 @@ async function boot() {
     remotePlayers = new RemotePlayers(scene);
     // posed CS player model (sequence 1 = idle) for remote avatars
     loadMDL('assets/models/cs/player/leet.mdl', { sequence: 1 })
-      .then((data) => remotePlayers.setTemplate(buildWorldModel(data, { center: false })))
+      .then((data) => remotePlayers.setTemplate(data))
       .catch((e) => console.warn('[surf] player model load failed:', e.message));
     net = new Net();
     net.on('state', (id, data) => remotePlayers.update(id, data));

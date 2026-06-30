@@ -372,6 +372,72 @@ export function buildWorldModel(data, { center = true } = {}) {
   return group;
 }
 
+// GoldSrc model axes -> three (Z-up to Y-up): (x, y, z) -> (x, z, -y).
+function remapModelArray(src) {
+  const out = new Float32Array(src.length);
+  for (let i = 0; i < src.length; i += 3) { out[i] = src[i]; out[i + 1] = src[i + 2]; out[i + 2] = -src[i + 1]; }
+  return out;
+}
+
+// Build an *animated* player model from a parsed MDL. Returns { group, apply,
+// modelMinY }. apply(seqIndex, fracFrame) deforms the geometry to that sequence
+// frame, interpolating between the two bracketing integer frames. Each call
+// builds its own geometry (so peers animate independently), but baked frames are
+// cached on the shared `data` so the per-peer cost is just a vertex lerp + copy.
+export function buildAnimatedModel(data) {
+  const cache = data._animCache || (data._animCache = new Map()); // "seq:frame" -> [{pos,nrm} per group] in three space
+  function frame(seq, fr) {
+    const key = seq + ':' + fr;
+    let c = cache.get(key);
+    if (!c) {
+      c = data.anim.bake(seq, fr).map((b) => ({ pos: remapModelArray(b.positions), nrm: remapModelArray(b.normals) }));
+      cache.set(key, c);
+    }
+    return c;
+  }
+  const group = new THREE.Group();
+  const meshes = [];
+  let minY = 1e9;
+  data.groups.forEach((g) => {
+    const init = remapModelArray(g.positions);
+    for (let i = 1; i < init.length; i += 3) if (init[i] < minY) minY = init[i];
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(init, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(remapModelArray(g.normals), 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2));
+    let mat;
+    if (g.tex) {
+      const tex = new THREE.DataTexture(g.tex.rgba, g.tex.w, g.tex.h, THREE.RGBAFormat);
+      tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
+      mat = new THREE.MeshLambertMaterial({ map: tex, transparent: g.tex.masked, alphaTest: g.tex.masked ? 0.5 : 0, side: THREE.DoubleSide });
+    } else {
+      mat = new THREE.MeshLambertMaterial({ color: 0x999999 });
+    }
+    const m = new THREE.Mesh(geo, mat); m.frustumCulled = false;
+    group.add(m); meshes.push(m);
+  });
+  group.userData.modelMinY = minY;
+
+  function apply(seq, fracFrame) {
+    const sq = data.anim.sequences[seq];
+    if (!sq) return;
+    const nf = Math.max(1, sq.numframes);
+    const base = ((fracFrame % nf) + nf) % nf;
+    const f0 = Math.floor(base);
+    const f1 = (f0 + 1) % nf;
+    const t = base - f0;
+    const a = frame(seq, f0), b = frame(seq, f1);
+    for (let gi = 0; gi < meshes.length; gi++) {
+      const posAttr = meshes[gi].geometry.attributes.position, nrmAttr = meshes[gi].geometry.attributes.normal;
+      const pos = posAttr.array, nrm = nrmAttr.array;
+      const ap = a[gi].pos, bp = b[gi].pos, an = a[gi].nrm, bn = b[gi].nrm;
+      for (let i = 0; i < pos.length; i++) { pos[i] = ap[i] + (bp[i] - ap[i]) * t; nrm[i] = an[i] + (bn[i] - an[i]) * t; }
+      posAttr.needsUpdate = true; nrmAttr.needsUpdate = true;
+    }
+  }
+  return { group, apply, modelMinY: minY };
+}
+
 // A simple vertical-gradient sky dome (the office WAD sky isn't shipped).
 export function buildSky(top = 0x9fb8d6, bottom = 0xdfe9f2, radius = 30000) {
   const geo = new THREE.SphereGeometry(radius, 32, 16);

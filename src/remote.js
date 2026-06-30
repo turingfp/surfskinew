@@ -1,8 +1,9 @@
-// Renders other players in the session as simple avatars (capsule body + head
-// + name label), interpolated toward their latest networked state.
+// Renders other players in the session as animated avatars (a posed CS player
+// model that plays idle / walk / run from their networked movement) with a name
+// label, interpolated toward their latest networked state.
 
 import * as THREE from '../vendor/three.module.js';
-import { gs2three } from './render.js';
+import { gs2three, buildAnimatedModel } from './render.js';
 
 const COLORS = [0xff5d5d, 0x57a6ff, 0x5fd06f, 0xffc24d, 0xc66bff, 0x4de0d0, 0xff8f4d, 0xa0e85a];
 
@@ -28,24 +29,33 @@ export class RemotePlayers {
     this.scene = scene;
     this.players = new Map();
     this._ci = 0;
-    this.template = null; // posed CS player model, cloned per peer
+    this.templateData = null; // parsed CS player MDL (with .anim), built per peer
+    this.seq = null;          // resolved sequence indices for idle/walk/run
   }
 
-  setTemplate(group) { this.template = group; }
+  // Store the parsed player MDL (from loadMDL) and resolve movement sequences.
+  setTemplate(data) {
+    this.templateData = data;
+    const seqs = (data.anim && data.anim.sequences) || [];
+    const find = (...names) => { for (const n of names) { const i = seqs.findIndex((s) => s.name === n); if (i >= 0) return i; } return -1; };
+    this.seq = {
+      idle: find('idle1', 'idle', 'ref_aim_rifle'),
+      walk: find('walk'),
+      run: find('run'),
+    };
+  }
 
   _make(id) {
     const color = COLORS[this._ci++ % COLORS.length];
     const group = new THREE.Group();
-    let body;
-    if (this.template) {
-      body = this.template.clone(true);
-      // Rest the model's feet on the hull bottom (36u below the player centre).
-      // The MDL origin is near the hips, so offset by its lowest point instead
-      // of assuming feet-at-origin (otherwise the avatar sinks into the floor).
-      const minY = typeof body.userData.modelMinY === 'number' ? body.userData.modelMinY : -36;
-      body.position.y = -36 - minY;
+    let body, anim = null;
+    if (this.templateData) {
+      const am = buildAnimatedModel(this.templateData);
+      body = am.group; anim = am;
+      // rest feet on the hull bottom (36u below the player centre)
+      body.position.y = -36 - am.modelMinY;
     } else {
-      // fallback avatar (capsule + head)
+      // fallback avatar (capsule + head) until the model loads
       body = new THREE.Group();
       const cap = new THREE.Mesh(new THREE.CapsuleGeometry(14, 44, 6, 12), new THREE.MeshLambertMaterial({ color }));
       const head = new THREE.Mesh(new THREE.SphereGeometry(9, 12, 10), new THREE.MeshLambertMaterial({ color: 0xffe0bd }));
@@ -57,7 +67,7 @@ export class RemotePlayers {
     group.add(label);
     group.position.set(99999, 99999, 99999); // offscreen until first update
     this.scene.add(group);
-    const p = { group, body, color, cur: null, started: false };
+    const p = { group, body, anim, color, cur: null, started: false, phase: 0, seqCur: -1, speed: 0, prev: null };
     this.players.set(id, p);
     return p;
   }
@@ -90,13 +100,13 @@ export class RemotePlayers {
   get color() { return COLORS; }
   colorFor(id) { const p = this.players.get(id); return p ? p.color : 0xffffff; }
 
-  render() {
+  render(dt = 0.016) {
     for (const [, p] of this.players) {
       if (!p.cur) continue;
       const o = p.cur.o;
       const [tx, ty, tz] = gs2three(o[0], o[1], o[2]);
       const g = p.group;
-      if (!p.started) { g.position.set(tx, ty, tz); p.started = true; }
+      if (!p.started) { g.position.set(tx, ty, tz); p.started = true; p.prev = { x: tx, y: ty, z: tz }; }
       else {
         const k = 0.25; // smoothing toward the latest state
         g.position.x += (tx - g.position.x) * k;
@@ -104,6 +114,26 @@ export class RemotePlayers {
         g.position.z += (tz - g.position.z) * k;
       }
       if (p.body) p.body.rotation.y = (p.cur.y || 0); // face their yaw
+
+      if (p.anim && this.seq) {
+        // on-screen horizontal speed (three: X/Z are the ground plane)
+        const gp = g.position;
+        if (p.prev) {
+          const inst = Math.hypot(gp.x - p.prev.x, gp.z - p.prev.z) / Math.max(dt, 1e-3);
+          p.speed = p.speed * 0.7 + inst * 0.3;
+        }
+        p.prev = { x: gp.x, y: gp.y, z: gp.z };
+
+        let seq = this.seq.idle, rate = 1;
+        if (p.speed > 140 && this.seq.run >= 0) { seq = this.seq.run; }
+        else if (p.speed > 12 && this.seq.walk >= 0) { seq = this.seq.walk; }
+        if (seq < 0) seq = this.seq.idle;
+        if (seq !== p.seqCur) { p.seqCur = seq; p.phase = 0; }
+        const sq = this.templateData.anim.sequences[seq];
+        const fps = (sq && sq.fps) || 15;
+        p.phase += dt * fps * rate;
+        p.anim.apply(seq, p.phase);
+      }
     }
   }
 }

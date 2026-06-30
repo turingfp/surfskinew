@@ -75,33 +75,57 @@ export function parseMDL(arrayBuffer, opts = {}) {
   const numskinref = i32(192), skinindex = i32(200);
   const numbodyparts = i32(204), bodypartindex = i32(208);
 
-  // optional: pose a sequence's frame 0 (e.g. idle) instead of the bind pose
-  let anim = null;
-  if (opts.sequence != null && opts.sequence < numseq) {
-    const sd = seqindex + opts.sequence * 176;
-    anim = i32(sd + 124); // animindex (mstudioanim_t[bones], blend 0)
-  }
-  // RLE-decoded animation value for a bone channel at frame 0
-  function animFrame0(animBase, bone, ch) {
-    const off = u16(animBase + bone * 12 + ch * 2);
-    if (off === 0) return 0;
-    const p = animBase + bone * 12 + off; // first span; frame 0 => first value
-    return i16(p + 2); // skip [valid,total], read value[0]
+  // ---- bones: default pos/rot + per-channel animation scale + parent ----
+  const boneParent = new Int32Array(numbones);
+  const boneDef = []; // [b] -> [px,py,pz, rx,ry,rz]
+  const boneScale = []; // [b] -> [6]
+  for (let b = 0; b < numbones; b++) {
+    const o = boneindex + b * 112; // name[32], parent@32, flags@36, ctrl[6]@40, value[6]@64, scale[6]@88
+    boneParent[b] = i32(o + 32);
+    boneDef.push([f32(o + 64), f32(o + 68), f32(o + 72), f32(o + 76), f32(o + 80), f32(o + 84)]);
+    boneScale.push([f32(o + 88), f32(o + 92), f32(o + 96), f32(o + 100), f32(o + 104), f32(o + 108)]);
   }
 
-  // ---- bones -> world matrices ----
-  const world = new Array(numbones);
-  for (let b = 0; b < numbones; b++) {
-    // mstudiobone_t: name[32], parent@32, flags@36, bonecontroller[6]@40,
-    // value[6]@64 (pos xyz + rot xyz), scale[6]@88.
-    const o = boneindex + b * 112;
-    const parent = i32(o + 32);
-    const v = [f32(o + 64), f32(o + 68), f32(o + 72), f32(o + 76), f32(o + 80), f32(o + 84)];
-    if (anim != null) {
-      for (let j = 0; j < 6; j++) v[j] += animFrame0(anim, b, j) * f32(o + 88 + j * 4);
+  // RLE-decoded mstudioanim value for bone channel ch at an arbitrary frame.
+  // animBase points at the sequence's mstudioanim_t array (blend 0).
+  function animValue(animBase, bone, ch, frame) {
+    const recOff = u16(animBase + bone * 12 + ch * 2);
+    if (recOff === 0) return 0;
+    let p = animBase + bone * 12 + recOff; // mstudioanimvalue_t spans (2 bytes each)
+    let k = frame;
+    let valid = u8(p), total = u8(p + 1);
+    while (total <= k) {
+      k -= total;
+      p += (valid + 1) * 2;
+      valid = u8(p); total = u8(p + 1);
     }
-    const local = quatMatrix(angleQuaternion(v[3], v[4], v[5]), v[0], v[1], v[2]);
-    world[b] = parent >= 0 ? concat(world[parent], local) : local;
+    return (valid > k) ? i16(p + (k + 1) * 2) : i16(p + valid * 2);
+  }
+
+  // Bone -> world matrices for a given sequence frame (animBase<0 => bind pose).
+  function computeWorld(animBase, frame) {
+    const world = new Array(numbones);
+    for (let b = 0; b < numbones; b++) {
+      const d = boneDef[b], s = boneScale[b];
+      const v = [d[0], d[1], d[2], d[3], d[4], d[5]];
+      if (animBase >= 0) for (let j = 0; j < 6; j++) v[j] += animValue(animBase, b, j, frame) * s[j];
+      const local = quatMatrix(angleQuaternion(v[3], v[4], v[5]), v[0], v[1], v[2]);
+      const par = boneParent[b];
+      world[b] = par >= 0 ? concat(world[par], local) : local;
+    }
+    return world;
+  }
+
+  // ---- sequences (for the animator) ----
+  const sequences = [];
+  for (let s = 0; s < numseq; s++) {
+    const sd = seqindex + s * 176; // label[32], fps@32, ..., numframes@56, ..., animindex@124
+    sequences.push({ name: str(sd, 32).toLowerCase(), fps: f32(sd + 32), numframes: i32(sd + 56), animindex: i32(sd + 124) });
+  }
+  // Resolve a sequence's anim base + clamp a frame to its length.
+  function seqAnim(seqIndex) {
+    if (seqIndex == null || seqIndex < 0 || seqIndex >= numseq) return null;
+    return sequences[seqIndex];
   }
 
   // ---- textures (8-bit palettized) ----
@@ -125,17 +149,16 @@ export function parseMDL(arrayBuffer, opts = {}) {
   const skin = [];
   for (let s = 0; s < numskinref; s++) skin.push(i16(skinindex + s * 2));
 
-  // ---- geometry, grouped by texture ----
-  const buckets = new Map(); // texIndex -> {pos:[], nrm:[], uv:[]}
-  const min = [1e9, 1e9, 1e9], max = [-1e9, -1e9, -1e9];
-  const grow = (p) => { for (let k = 0; k < 3; k++) { if (p[k] < min[k]) min[k] = p[k]; if (p[k] > max[k]) max[k] = p[k]; } };
+  // ---- geometry topology, grouped by texture ----
+  // The triangle stream is pose-independent, so we walk it once and record, per
+  // emitted vertex, its LOCAL position + bone and LOCAL normal + bone. Any frame
+  // is then baked by re-transforming these locals through that frame's bones.
+  const buckets = new Map(); // texIndex -> { lp:[], vb:[], ln:[], nb:[], uv:[] }
 
   for (let bp = 0; bp < numbodyparts; bp++) {
     const o = bodypartindex + bp * 76;
     if (skip.has(str(o, 64).toLowerCase())) continue; // e.g. skip the unused "lhand"
-    const modelindex = i32(o + 72);
-    // use base submodel (index 0)
-    const mo = modelindex;
+    const mo = i32(o + 72); // base submodel (index 0)
     const nummesh = i32(mo + 64 + 8);
     const meshindex = i32(mo + 64 + 12);
     const numverts = i32(mo + 64 + 16);
@@ -145,19 +168,11 @@ export function parseMDL(arrayBuffer, opts = {}) {
     const norminfoindex = i32(mo + 64 + 32);
     const normindex = i32(mo + 64 + 36);
 
-    // transform verts & normals by their bone
-    const verts = new Array(numverts);
-    for (let v = 0; v < numverts; v++) {
-      const bone = u8(vertinfoindex + v);
-      const vo = vertindex + v * 12;
-      verts[v] = xformPoint(world[bone], [f32(vo), f32(vo + 4), f32(vo + 8)]);
-    }
-    const norms = new Array(numnorms);
-    for (let n = 0; n < numnorms; n++) {
-      const bone = u8(norminfoindex + n);
-      const no = normindex + n * 12;
-      norms[n] = xformDir(world[bone], [f32(no), f32(no + 4), f32(no + 8)]);
-    }
+    // local (un-posed) verts/normals + their bone bindings
+    const lverts = new Array(numverts), vbones = new Uint8Array(numverts);
+    for (let v = 0; v < numverts; v++) { vbones[v] = u8(vertinfoindex + v); const vo = vertindex + v * 12; lverts[v] = [f32(vo), f32(vo + 4), f32(vo + 8)]; }
+    const lnorms = new Array(numnorms), nbones = new Uint8Array(numnorms);
+    for (let n = 0; n < numnorms; n++) { nbones[n] = u8(norminfoindex + n); const no = normindex + n * 12; lnorms[n] = [f32(no), f32(no + 4), f32(no + 8)]; }
 
     for (let m = 0; m < nummesh; m++) {
       const meo = meshindex + m * 20;
@@ -166,10 +181,9 @@ export function parseMDL(arrayBuffer, opts = {}) {
       const texIdx = skin[skinref] ?? skinref;
       const tex = textures[texIdx] || { w: 64, h: 64 };
       let bucket = buckets.get(texIdx);
-      if (!bucket) { bucket = { pos: [], nrm: [], uv: [] }; buckets.set(texIdx, bucket); }
+      if (!bucket) { bucket = { lp: [], vb: [], ln: [], nb: [], uv: [] }; buckets.set(texIdx, bucket); }
 
-      // triangle command stream
-      while (true) {
+      while (true) { // triangle command stream
         let count = i16(tri); tri += 2;
         if (count === 0) break;
         const fan = count < 0;
@@ -178,14 +192,14 @@ export function parseMDL(arrayBuffer, opts = {}) {
         for (let k = 0; k < n; k++) {
           const vi = i16(tri), ni = i16(tri + 2), s = i16(tri + 4), tt = i16(tri + 6);
           tri += 8;
-          strip.push({ p: verts[vi], nv: norms[ni] || [0, 0, 1], u: s / tex.w, v: tt / tex.h });
+          strip.push({ vi, ni, u: s / tex.w, v: tt / tex.h });
         }
         const emit = (a, c, d) => {
           for (const vert of [a, c, d]) {
-            bucket.pos.push(vert.p[0], vert.p[1], vert.p[2]);
-            bucket.nrm.push(vert.nv[0], vert.nv[1], vert.nv[2]);
+            const lp = lverts[vert.vi], ln = lnorms[vert.ni] || [0, 0, 1];
+            bucket.lp.push(lp[0], lp[1], lp[2]); bucket.vb.push(vbones[vert.vi]);
+            bucket.ln.push(ln[0], ln[1], ln[2]); bucket.nb.push(nbones[vert.ni] || 0);
             bucket.uv.push(vert.u, vert.v);
-            grow(vert.p);
           }
         };
         if (fan) {
@@ -200,16 +214,56 @@ export function parseMDL(arrayBuffer, opts = {}) {
     }
   }
 
-  const groups = [];
+  // finalize per-group topology
+  const topo = [];
   for (const [texIdx, b] of buckets) {
-    groups.push({
+    topo.push({
       tex: textures[texIdx] || null,
-      positions: new Float32Array(b.pos),
-      normals: new Float32Array(b.nrm),
+      lp: new Float32Array(b.lp), vb: Uint8Array.from(b.vb),
+      ln: new Float32Array(b.ln), nb: Uint8Array.from(b.nb),
       uvs: new Float32Array(b.uv),
+      count: b.vb.length,
     });
   }
-  return { groups, textures, min, max };
+
+  // Bake a sequence frame -> per-group {positions, normals} in MODEL space.
+  function bake(seqIndex, frame) {
+    const sq = seqAnim(seqIndex);
+    let animBase = -1;
+    if (sq) { frame = Math.max(0, Math.min(sq.numframes - 1, frame | 0)); animBase = sq.animindex; }
+    const world = computeWorld(animBase, frame);
+    return topo.map((g) => {
+      const n = g.count;
+      const positions = new Float32Array(n * 3), normals = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const wp = world[g.vb[i]], wn = world[g.nb[i]];
+        const li = i * 3;
+        const px = g.lp[li], py = g.lp[li + 1], pz = g.lp[li + 2];
+        positions[li] = wp[0] * px + wp[1] * py + wp[2] * pz + wp[3];
+        positions[li + 1] = wp[4] * px + wp[5] * py + wp[6] * pz + wp[7];
+        positions[li + 2] = wp[8] * px + wp[9] * py + wp[10] * pz + wp[11];
+        const nx = g.ln[li], ny = g.ln[li + 1], nz = g.ln[li + 2];
+        normals[li] = wn[0] * nx + wn[1] * ny + wn[2] * nz;
+        normals[li + 1] = wn[4] * nx + wn[5] * ny + wn[6] * nz;
+        normals[li + 2] = wn[8] * nx + wn[9] * ny + wn[10] * nz;
+      }
+      return { positions, normals };
+    });
+  }
+
+  // initial pose: opts.sequence frame 0 (e.g. idle), else bind pose
+  const initSeq = (opts.sequence != null && opts.sequence < numseq) ? opts.sequence : -1;
+  const baked = bake(initSeq, 0);
+  const min = [1e9, 1e9, 1e9], max = [-1e9, -1e9, -1e9];
+  const groups = topo.map((g, gi) => {
+    const positions = baked[gi].positions;
+    for (let i = 0; i < positions.length; i += 3) {
+      for (let k = 0; k < 3; k++) { const c = positions[i + k]; if (c < min[k]) min[k] = c; if (c > max[k]) max[k] = c; }
+    }
+    return { tex: g.tex, positions, normals: baked[gi].normals, uvs: g.uvs };
+  });
+
+  return { groups, textures, min, max, anim: { sequences, bake, numbones } };
 }
 
 export async function loadMDL(url, opts = {}) {
