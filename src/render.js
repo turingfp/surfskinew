@@ -397,6 +397,15 @@ export function buildAnimatedModel(data, { remap = remapModelArray } = {}) {
     }
     return c;
   }
+  function frameBlend(moveSeq, moveFr, aimSeq, aimFr) {
+    const key = 'b:' + moveSeq + ':' + moveFr + ':' + aimSeq + ':' + aimFr;
+    let c = cache.get(key);
+    if (!c) {
+      c = data.anim.bakeBlend(moveSeq, moveFr, aimSeq, aimFr).map((b) => ({ pos: remap(b.positions), nrm: remap(b.normals) }));
+      cache.set(key, c);
+    }
+    return c;
+  }
   const group = new THREE.Group();
   const meshes = [];
   let minY = 1e9;
@@ -420,15 +429,7 @@ export function buildAnimatedModel(data, { remap = remapModelArray } = {}) {
   });
   group.userData.modelMinY = minY;
 
-  function apply(seq, fracFrame) {
-    const sq = data.anim.sequences[seq];
-    if (!sq) return;
-    const nf = Math.max(1, sq.numframes);
-    const base = ((fracFrame % nf) + nf) % nf;
-    const f0 = Math.floor(base);
-    const f1 = (f0 + 1) % nf;
-    const t = base - f0;
-    const a = frame(seq, f0), b = frame(seq, f1);
+  function writeFrames(a, b, t) {
     for (let gi = 0; gi < meshes.length; gi++) {
       const posAttr = meshes[gi].geometry.attributes.position, nrmAttr = meshes[gi].geometry.attributes.normal;
       const pos = posAttr.array, nrm = nrmAttr.array;
@@ -437,7 +438,30 @@ export function buildAnimatedModel(data, { remap = remapModelArray } = {}) {
       posAttr.needsUpdate = true; nrmAttr.needsUpdate = true;
     }
   }
-  return { group, apply, modelMinY: minY };
+  function apply(seq, fracFrame) {
+    const sq = data.anim.sequences[seq];
+    if (!sq) return;
+    const nf = Math.max(1, sq.numframes);
+    const base = ((fracFrame % nf) + nf) % nf;
+    const f0 = Math.floor(base);
+    const f1 = (f0 + 1) % nf;
+    writeFrames(frame(seq, f0), frame(seq, f1), base - f0);
+  }
+  // Like apply(), but blends a movement sequence (legs: idle/walk/run) with a
+  // fixed frame of a weapon-holding "aim" sequence (everything else) — the
+  // same gaitsequence/sequence split GoldSrc uses so third-person avatars
+  // hold their weapon instead of showing bind-pose (T-posed) arms. aimSeq < 0
+  // degrades to a plain apply(moveSeq, moveFracFrame).
+  function applyBlend(moveSeq, moveFracFrame, aimSeq, aimFrame = 0) {
+    const sq = data.anim.sequences[moveSeq];
+    if (!sq) return;
+    const nf = Math.max(1, sq.numframes);
+    const base = ((moveFracFrame % nf) + nf) % nf;
+    const f0 = Math.floor(base);
+    const f1 = (f0 + 1) % nf;
+    writeFrames(frameBlend(moveSeq, f0, aimSeq, aimFrame), frameBlend(moveSeq, f1, aimSeq, aimFrame), base - f0);
+  }
+  return { group, apply, applyBlend, modelMinY: minY };
 }
 
 // A simple vertical-gradient sky dome (the office WAD sky isn't shipped).

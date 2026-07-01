@@ -9,7 +9,7 @@
 import { createPlayerState, runTick } from './physics.js';
 import { FORWARD_SPEED } from './constants.js';
 import { normalize, length, sub } from './vec.js';
-import { weaponSpec } from './weapons.js';
+import { weaponSpec, WEAPON_LIST } from './weapons.js';
 
 const NAMES = ['Raptor', 'Ghost', 'Viper', 'Reaper', 'Nomad', 'Cobra', 'Blitz', 'Hunter', 'Rhino', 'Falcon', 'Jackal', 'Widow'];
 let nameSeq = 0;
@@ -22,7 +22,10 @@ const WAYPOINT_RADIUS = 40;
 const REPATH_INTERVAL = 1.5;
 const STUCK_CHECK_INTERVAL = 1.2;
 const STUCK_DIST = 24; // if the bot hasn't moved this far in STUCK_CHECK_INTERVAL, it's stuck
-const WEAPON_CHOICES = ['ak47', 'm4a1', 'deagle', 'usp', 'm3'];
+// The full CS 1.6 arsenal — every weapon has a complete spec (weapons.js),
+// a first-person viewmodel, and a third-person aim pose (remote.js's
+// AIM_CATEGORY), so bots can safely use any of them.
+const WEAPON_CHOICES = WEAPON_LIST;
 
 function angleLerp(a, b, t) {
   let d = b - a;

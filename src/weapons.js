@@ -146,6 +146,13 @@ export class Weapons {
     this._playRaw('draw', 0.5);
     if (this.vm) this.vm.kick(0.3);
   }
+  // Full ammo refill on respawn — dying and coming back with yesterday's
+  // empty clip (and no way to reload without a pickup) isn't the intent;
+  // a fresh life gets a fresh loadout, same as picking up every weapon.
+  resetAmmo() {
+    for (const [k, s] of Object.entries(SPECS)) this.ammo[k] = { clip: s.clip, reserve: s.reserve };
+    this.reloading = false;
+  }
   spec() { return SPECS[this.current]; }
   ammoState() {
     const a = this.ammo[this.current];
@@ -289,7 +296,7 @@ export class Weapons {
 
   remoteShot(data) {
     if (!data || !data.o) return;
-    const spec = SPECS[data.w] || SPECS.pistol;
+    const spec = SPECS[data.w] || SPECS.usp;
     this._playRaw(spec.sound, spec.vol * 0.4);
     const dirGS = angleVectors(data.p || 0, data.y || 0).forward;
     // muzzle flash in the world at the remote shooter's barrel

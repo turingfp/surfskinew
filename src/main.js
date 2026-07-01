@@ -297,6 +297,7 @@ function respawn() {
   prevOrigin = copy(state.origin);
   runTime = 0; runStarted = false; finishTime = null;
   health = 100;
+  if (weapons) weapons.resetAmmo(); // fresh life, fresh loadout — not yesterday's empty clip
   scopeLevel = 0; // drop the scope on (re)spawn
   if (hud) hud.peak = 0;
 }
@@ -699,7 +700,7 @@ function frame(nowMs) {
   if (remotePlayers) {
     for (const [id, bot] of bots) {
       if (bot.dead) { remotePlayers.remove(id); continue; }
-      remotePlayers.update(id, { o: bot.state.origin, y: bot.facingYaw, hp: bot.health, nm: bot.name, k: bot.kills, d: bot.deaths, pk: 0 });
+      remotePlayers.update(id, { o: bot.state.origin, y: bot.facingYaw, hp: bot.health, nm: bot.name, k: bot.kills, d: bot.deaths, pk: 0, w: bot.weaponId });
     }
   }
 
@@ -1175,6 +1176,7 @@ async function boot() {
       ready: true,
       scene, // test hook: inspect/tweak materials for visual diagnosis
       viewmodel, // test hook
+      weapons, // test hook
       stats,
       bounds,
       spawn,
@@ -1211,6 +1213,8 @@ async function boot() {
       traceBullet: (a, b) => world.traceBullet(a, b),
       debugHitTest: (eye, dir) => playerHitTest(eye, dir),
       debugDamageBot: (id, dmg) => weapons.onPlayerHit(id, dmg),
+      debugDamagePlayer: (dmg, by = 'test') => applyDamage(dmg, by, null),
+      ammoState: () => (weapons ? weapons.ammoState() : null),
       rendererInfo: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }),
     };
 

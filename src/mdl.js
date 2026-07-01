@@ -79,11 +79,20 @@ export function parseMDL(arrayBuffer, opts = {}) {
   const boneParent = new Int32Array(numbones);
   const boneDef = []; // [b] -> [px,py,pz, rx,ry,rz]
   const boneScale = []; // [b] -> [6]
+  // Which bones are legs (thigh/calf/foot/toe/knee/ankle) vs everything else
+  // (spine, arms, head) — used to blend a movement sequence (legs) with a
+  // weapon-holding "aim" sequence (upper body), the same split GoldSrc's
+  // gaitsequence/sequence blending does. Player-rig bone names only use these
+  // substrings in the leg chain, so a name match is enough (no need to walk
+  // the parent hierarchy).
+  const LEG_NAME_RE = /thigh|calf|foot|toe|knee|ankle/i;
+  const isLegBone = new Uint8Array(numbones);
   for (let b = 0; b < numbones; b++) {
     const o = boneindex + b * 112; // name[32], parent@32, flags@36, ctrl[6]@40, value[6]@64, scale[6]@88
     boneParent[b] = i32(o + 32);
     boneDef.push([f32(o + 64), f32(o + 68), f32(o + 72), f32(o + 76), f32(o + 80), f32(o + 84)]);
     boneScale.push([f32(o + 88), f32(o + 92), f32(o + 96), f32(o + 100), f32(o + 104), f32(o + 108)]);
+    isLegBone[b] = LEG_NAME_RE.test(str(o, 32)) ? 1 : 0;
   }
 
   // RLE-decoded mstudioanim value for bone channel ch at an arbitrary frame.
@@ -226,12 +235,9 @@ export function parseMDL(arrayBuffer, opts = {}) {
     });
   }
 
-  // Bake a sequence frame -> per-group {positions, normals} in MODEL space.
-  function bake(seqIndex, frame) {
-    const sq = seqAnim(seqIndex);
-    let animBase = -1;
-    if (sq) { frame = Math.max(0, Math.min(sq.numframes - 1, frame | 0)); animBase = sq.animindex; }
-    const world = computeWorld(animBase, frame);
+  // Skin every group's local verts/normals through a bone -> world matrix
+  // array, producing per-group {positions, normals} in MODEL space.
+  function skinVerts(world) {
     return topo.map((g) => {
       const n = g.count;
       const positions = new Float32Array(n * 3), normals = new Float32Array(n * 3);
@@ -251,6 +257,34 @@ export function parseMDL(arrayBuffer, opts = {}) {
     });
   }
 
+  function animBaseAndFrame(seqIndex, frame) {
+    const sq = seqAnim(seqIndex);
+    if (!sq) return { animBase: -1, frame: 0 };
+    return { animBase: sq.animindex, frame: Math.max(0, Math.min(sq.numframes - 1, frame | 0)) };
+  }
+
+  // Bake a sequence frame -> per-group {positions, normals} in MODEL space.
+  function bake(seqIndex, frame) {
+    const af = animBaseAndFrame(seqIndex, frame);
+    return skinVerts(computeWorld(af.animBase, af.frame));
+  }
+
+  // Bake a MOVEMENT sequence (idle/walk/run — legs) blended with an AIM
+  // sequence (weapon-holding pose — everything else), matching GoldSrc's
+  // gaitsequence/sequence split. Falls back to a plain movement-only bake if
+  // no aim sequence is given (e.g. unknown weapon), so callers always get a
+  // valid pose instead of a bind-pose/T-pose.
+  function bakeBlend(moveSeq, moveFrame, aimSeq, aimFrame) {
+    const mv = animBaseAndFrame(moveSeq, moveFrame);
+    if (aimSeq == null || aimSeq < 0) return skinVerts(computeWorld(mv.animBase, mv.frame));
+    const worldMove = computeWorld(mv.animBase, mv.frame);
+    const am = animBaseAndFrame(aimSeq, aimFrame);
+    const worldAim = computeWorld(am.animBase, am.frame);
+    const world = new Array(numbones);
+    for (let b = 0; b < numbones; b++) world[b] = isLegBone[b] ? worldMove[b] : worldAim[b];
+    return skinVerts(world);
+  }
+
   // initial pose: opts.sequence frame 0 (e.g. idle), else bind pose
   const initSeq = (opts.sequence != null && opts.sequence < numseq) ? opts.sequence : -1;
   const baked = bake(initSeq, 0);
@@ -263,7 +297,7 @@ export function parseMDL(arrayBuffer, opts = {}) {
     return { tex: g.tex, positions, normals: baked[gi].normals, uvs: g.uvs };
   });
 
-  return { groups, textures, min, max, anim: { sequences, bake, numbones } };
+  return { groups, textures, min, max, anim: { sequences, bake, bakeBlend, numbones } };
 }
 
 export async function loadMDL(url, opts = {}) {

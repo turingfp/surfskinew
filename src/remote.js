@@ -7,6 +7,19 @@ import { gs2three, buildAnimatedModel } from './render.js';
 
 const COLORS = [0xff5d5d, 0x57a6ff, 0x5fd06f, 0xffc24d, 0xc66bff, 0x4de0d0, 0xff8f4d, 0xa0e85a];
 
+// Weapon id -> the CS player model's third-person "aim" animation category
+// (arms/upper body pose while holding that weapon). The leet/urban rigs only
+// ship a handful of these categories, shared across similarly-held weapons.
+const AIM_CATEGORY = {
+  usp: 'onehanded', glock: 'onehanded', deagle: 'onehanded',
+  ak47: 'ak47',
+  m4a1: 'carbine',
+  mp5: 'mp5', tmp: 'mp5', mac10: 'mp5', p90: 'mp5',
+  sg552: 'rifle', aug: 'rifle', scout: 'rifle', awp: 'rifle', g3sg1: 'rifle',
+  m3: 'shotgun', xm1014: 'shotgun',
+  m249: 'm249',
+};
+
 function makeLabel(text, color) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;
@@ -33,7 +46,10 @@ export class RemotePlayers {
     this.seq = null;          // resolved sequence indices for idle/walk/run
   }
 
-  // Store the parsed player MDL (from loadMDL) and resolve movement sequences.
+  // Store the parsed player MDL (from loadMDL) and resolve movement sequences
+  // (legs) + per-weapon-category aim sequences (arms/upper body — see
+  // AIM_CATEGORY). Standing aim poses are "ref_aim_*"; ducking isn't tracked
+  // for remote avatars today so "crouch_aim_*" is unused.
   setTemplate(data) {
     this.templateData = data;
     const seqs = (data.anim && data.anim.sequences) || [];
@@ -43,6 +59,8 @@ export class RemotePlayers {
       walk: find('walk'),
       run: find('run'),
     };
+    this.aimSeq = {};
+    for (const cat of new Set(Object.values(AIM_CATEGORY))) this.aimSeq[cat] = find(`ref_aim_${cat}`);
   }
 
   _make(id) {
@@ -132,7 +150,12 @@ export class RemotePlayers {
         const sq = this.templateData.anim.sequences[seq];
         const fps = (sq && sq.fps) || 15;
         p.phase += dt * fps * rate;
-        p.anim.apply(seq, p.phase);
+        // Blend the movement sequence (legs) with the held weapon's aim pose
+        // (arms) — without this, arms stay at bind pose (T-pose) since the
+        // walk/run/idle sequences don't include a weapon-holding pose.
+        const cat = AIM_CATEGORY[p.cur.w];
+        const aimSeq = cat != null ? this.aimSeq[cat] : -1;
+        p.anim.applyBlend(seq, p.phase, aimSeq != null ? aimSeq : -1);
       }
     }
   }
