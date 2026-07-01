@@ -23,9 +23,13 @@ export class Viewmodel {
     this.scene.add(rim);
 
     this.rig = new THREE.Group();
-    // bottom-right placement in view space (camera looks down -Z)
-    this.baseX = 0.2; this.baseY = -0.24;
-    this.rig.position.set(this.baseX, this.baseY, -0.46);
+    // Held-weapon placement in view space (camera looks down -Z). The gun sits
+    // in the lower portion, slightly right of center, and is pushed a full unit
+    // into the scene so it reads as emerging from the player's view pointing
+    // forward — not flung off the right edge. Keeping baseZ well away from the
+    // camera also stops perspective from magnifying the offset off-screen.
+    this.baseX = 0.2; this.baseY = -0.4; this.baseZ = -1.2;
+    this.rig.position.set(this.baseX, this.baseY, this.baseZ);
     this.scene.add(this.rig);
 
     this.weapons = {};
@@ -115,7 +119,7 @@ export class Viewmodel {
     const wrap = new THREE.Group();
     wrap.add(inner);
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    wrap.scale.setScalar(0.5 / maxDim);
+    wrap.scale.setScalar(0.8 / maxDim);
     wrap.rotation.set(this._vmEuler[0], this._vmEuler[1], this._vmEuler[2]);
     return wrap;
   }
@@ -177,7 +181,7 @@ export class Viewmodel {
     }
     this.rig.position.y = this.baseY + Math.sin(this.bobT) * amp - this.recoil * 0.01 - dip * 0.14;
     this.rig.position.x = this.baseX + Math.cos(this.bobT * 0.5) * amp * 0.6;
-    this.rig.position.z = -0.46 + this.recoil * 0.05;
+    this.rig.position.z = this.baseZ + this.recoil * 0.05;
     this.rig.rotation.x = -this.recoil * 0.18 + dip * 0.5;
   }
 
