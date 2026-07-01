@@ -27,7 +27,14 @@ export function generateNavGraph(bsp, world) {
       const top = maxs[2] + 32;
       const bottom = mins[2] - 32;
       const tr = world.traceHull([x, y, top], [x, y, bottom], HULL.STAND.hullIndex);
-      if (tr.fraction >= 1 || tr.startsolid || tr.allsolid || !tr.plane) continue;
+      // Note: don't reject on tr.startsolid. The sample column starts at the
+      // map's GLOBAL max Z, which for any (x,y) not directly under the map's
+      // single tallest point sits inside the "outside the level" solid void
+      // (or under a roof/skybox brush) — so startsolid is true almost
+      // everywhere despite the sweep still correctly finding a real floor
+      // plane on the way down. Only allsolid (no open space anywhere on the
+      // ray — a genuinely solid column) should disqualify the sample.
+      if (tr.fraction >= 1 || tr.allsolid || !tr.plane) continue;
       if (tr.plane.normal[2] < 0.7) continue; // ramp/wall, not walkable floor
       const floor = tr.endpos;
       const standAt = [floor[0], floor[1], floor[2] + 4];

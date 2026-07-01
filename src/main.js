@@ -325,18 +325,33 @@ function playerHitTest(eyeGS, dirGS) {
   return best;
 }
 
-function applyDamage(dmg, by, attackerPos) {
+// attackerBot: the Bot instance credited with the kill, or null/undefined
+// when the attacker is a bot but shouldn't be credited (e.g. remote net hit,
+// which is a real peer, not a bot — see net.on('hit', ...)).
+function applyDamage(dmg, by, attackerPos, attackerBot) {
   if (input && input.noclip) return;
   if (attackerPos) showDamageDir(attackerPos);
   health -= dmg;
   if (health <= 0) {
     deaths++;
+    if (attackerBot) attackerBot.kills++;
     addKill(`<b>${escHtml(by)}</b> ▸ ${escHtml(playerName)}`);
     if (net && net.connected) net.broadcastFrag({ by, victim: playerName });
     if (hud) hud.toast(`Fragged by ${escHtml(by)}`, '#ff6b6b');
     showDeathFlash();
     respawn(); // resets health to 100
   }
+}
+
+// Apply damage to a bot and, if it dies, credit the kill + log it to the feed.
+// attackerBot is the shooting Bot, or null when the human player is the
+// shooter (credited to the player's own `kills` counter instead).
+function fragBotIfKilled(victim, dmg, attackerName, attackerBot) {
+  if (!victim.takeDamage(dmg)) return false;
+  if (attackerBot) attackerBot.kills++; else kills++;
+  addKill(`<b>${escHtml(attackerName)}</b> ▸ ${escHtml(victim.name)}`);
+  victim.respawnAt = gameClock + 3;
+  return true;
 }
 
 function inAABB(p, b) {
@@ -485,12 +500,28 @@ function updateBotUI() {
   if (el) el.textContent = String(bots.size);
 }
 
+// Every living shootable entity this tick: the human player plus all
+// non-dead bots. Bots pick their engagement target from this list (nearest
+// first) and their shots are hit-tested against everyone in it except
+// themselves — this is what lets bots fight each other, not just the player.
+function livingTargets() {
+  const viewZ = state.ducking ? HULL.DUCK.viewZ : HULL.STAND.viewZ;
+  const list = [{
+    kind: 'player', ref: null, name: playerName, originGS: state.origin,
+    eyeGS: [state.origin[0], state.origin[1], state.origin[2] + viewZ],
+  }];
+  for (const bot of bots.values()) {
+    if (bot.dead) continue;
+    list.push({ kind: 'bot', ref: bot, name: bot.name, originGS: bot.state.origin, eyeGS: bot.eyeGS });
+  }
+  return list;
+}
+
 // Runs inside the fixed physics step so bot movement/collision stays in
 // lockstep with the player's own runTick, at the same 100Hz.
 function tickBots(dt) {
   if (bots.size === 0) return;
-  const viewZ = state.ducking ? HULL.DUCK.viewZ : HULL.STAND.viewZ;
-  const target = { originGS: state.origin, eyeGS: [state.origin[0], state.origin[1], state.origin[2] + viewZ] };
+  const targets = livingTargets();
   for (const bot of bots.values()) {
     if (bot.dead) {
       if (bot.respawnAt != null && gameClock >= bot.respawnAt) {
@@ -499,14 +530,35 @@ function tickBots(dt) {
       }
       continue;
     }
+    // Engage whoever is nearest (player or another bot), excluding self.
+    let target = null, bestDist = Infinity;
+    for (const t of targets) {
+      if (t.ref === bot) continue;
+      const dx = t.originGS[0] - bot.state.origin[0], dy = t.originGS[1] - bot.state.origin[1], dz = t.originGS[2] - bot.state.origin[2];
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < bestDist) { bestDist = d; target = t; }
+    }
     const fired = bot.think({ world, navGraph, dt, now: gameClock, target });
     if (fired) {
       if (weapons) weapons.remoteShot({ o: fired.eyeGS, y: fired.aimYaw, p: fired.aimPitch, w: bot.weaponId });
       const { forward } = angleVectors(fired.aimPitch, fired.aimYaw);
       const dir = jitterDir(forward, fired.spec.spread);
-      const bodyHit = raySphere(fired.eyeGS, dir, state.origin, 22);
-      const headHit = raySphere(fired.eyeGS, dir, [state.origin[0], state.origin[1], state.origin[2] + 30], 13);
-      if (bodyHit != null || headHit != null) applyDamage(fired.dmg, bot.name, bot.state.origin);
+      // Hit-test against everyone else, not just whoever was targeted — the
+      // bot's aim may have drifted or the target may have moved since firing.
+      let best = null;
+      for (const t of targets) {
+        if (t.ref === bot) continue;
+        const body = raySphere(fired.eyeGS, dir, t.originGS, 22);
+        const head = raySphere(fired.eyeGS, dir, [t.originGS[0], t.originGS[1], t.originGS[2] + 30], 13);
+        let dist = null;
+        if (body != null) dist = body;
+        if (head != null && (dist == null || head < dist)) dist = head;
+        if (dist != null && (!best || dist < best.dist)) best = { t, dist };
+      }
+      if (best) {
+        if (best.t.kind === 'player') applyDamage(fired.dmg, bot.name, bot.state.origin, bot);
+        else fragBotIfKilled(best.t.ref, fired.dmg, bot.name, bot);
+      }
     }
   }
 }
@@ -901,11 +953,8 @@ async function boot() {
       if (hud) hud.hitMarker();
       const bot = bots.get(id);
       if (bot) {
-        if (bot.takeDamage(dmg)) {
-          kills++;
-          addKill(`<b>${escHtml(playerName)}</b> ▸ ${escHtml(bot.name)}`);
+        if (fragBotIfKilled(bot, dmg, playerName, null)) {
           if (hud) hud.toast(`Fragged ${escHtml(bot.name)}`, '#7fd1ae');
-          bot.respawnAt = gameClock + 3;
         }
         return;
       }
@@ -997,12 +1046,37 @@ async function boot() {
     const joinBtn = document.getElementById('mp-join');
     const roomInput = document.getElementById('mp-room');
     const mpStatus = document.getElementById('mp-status');
+    const createBtn = document.getElementById('mp-create');
+    const inviteRow = document.getElementById('mp-invite-row');
+    const inviteInput = document.getElementById('mp-invite');
+    const copyBtn = document.getElementById('mp-copy');
     // Allow ?room=name to preselect a multiplayer room (handy for sharing a
     // private match link, and for multi-session testing).
     const roomParam = new URLSearchParams(location.search).get('room');
     if (roomParam && roomInput) roomInput.value = roomParam.slice(0, 24);
+
+    // Short, unambiguous room codes for "Create server" (excludes 0/O/1/I/L).
+    function randomRoomCode(len = 5) {
+      const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+      let s = '';
+      for (let i = 0; i < len; i++) s += chars[(Math.random() * chars.length) | 0];
+      return s;
+    }
+    // Keep the URL's ?room= in sync so the address bar itself is a shareable
+    // invite link, without a page reload.
+    function setRoomQueryParam(room) {
+      const url = new URL(location.href);
+      if (room && room !== 'public') url.searchParams.set('room', room);
+      else url.searchParams.delete('room');
+      history.replaceState(null, '', url.pathname + url.search);
+    }
+    function updateInviteUI(room) {
+      const custom = room && room !== 'public';
+      if (inviteRow) inviteRow.style.display = custom ? '' : 'none';
+      if (custom && inviteInput) inviteInput.value = `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}`;
+    }
     // Fair-play: noclip + checkpoint teleport are disabled in the shared public
-    // room; renaming the room to your own match enables everything.
+    // room; a created/joined custom room enables everything.
     function applyRoomRules(room) {
       const custom = room && room !== 'public';
       if (input) input.setCheats(custom);
@@ -1013,8 +1087,8 @@ async function boot() {
       if (clearBotBtn) clearBotBtn.disabled = !custom;
       const note = document.getElementById('mp-note');
       if (note) note.textContent = custom
-        ? 'custom match: noclip + checkpoints + bots enabled.'
-        : 'public match: no noclip / teleport / bots (fair play). rename the room to start your own match where everything is enabled.';
+        ? 'custom match: noclip + checkpoints + bots enabled. Share the invite link below to play with friends.'
+        : 'public match: no noclip / teleport / bots (fair play). Create a server to start your own match where everything is enabled.';
     }
     async function connectMP(room) {
       if (mpStatus) mpStatus.textContent = 'connecting…';
@@ -1023,6 +1097,8 @@ async function boot() {
         await net.join(room);
         if (joinBtn) joinBtn.textContent = 'Leave';
         if (mpStatus) mpStatus.textContent = `room: ${room}`;
+        setRoomQueryParam(room);
+        updateInviteUI(room);
       } catch (err) {
         if (joinBtn) joinBtn.textContent = 'Join';
         if (mpStatus) mpStatus.textContent = `offline (${err.message})`;
@@ -1034,9 +1110,32 @@ async function boot() {
           net.leave(); remotePlayers.clear();
           joinBtn.textContent = 'Join'; if (mpStatus) mpStatus.textContent = 'offline';
           applyRoomRules((roomInput && roomInput.value.trim()) || 'public');
+          setRoomQueryParam('public');
+          updateInviteUI('public');
         } else {
           connectMP((roomInput && roomInput.value.trim()) || 'public');
         }
+      });
+    }
+    if (createBtn) {
+      createBtn.addEventListener('click', () => {
+        const code = randomRoomCode();
+        if (roomInput) roomInput.value = code;
+        connectMP(code);
+      });
+    }
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        const link = inviteInput ? inviteInput.value : '';
+        if (!link) return;
+        try {
+          await navigator.clipboard.writeText(link);
+        } catch {
+          inviteInput.select();
+          document.execCommand('copy');
+        }
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
       });
     }
     const addBotBtn = document.getElementById('mp-addbot');
@@ -1096,7 +1195,7 @@ async function boot() {
       addTestAvatar: (o, y) => remotePlayers && remotePlayers.update('TESTBOT', { o, y: y || 0, nm: 'BOT' }), // static, non-AI, for avatar-rendering tests
       spawnBot: () => addBot(), // real AI bot; test hook so headless tests don't need the (room-gated) UI button
       clearBots: () => clearBots(),
-      botsInfo: () => ({ navReady: !!navGraph, navNodes: navGraph ? navGraph.nodes.length : 0, gameClock, bots: [...bots.values()].map((b) => ({ id: b.id, name: b.name, o: [...b.state.origin], hp: b.health, dead: b.dead, weapon: b.weaponId, pathLen: b.path ? b.path.length : null, pathIdx: b.pathIdx, moveYaw: b.moveYaw, onground: b.state.onground, vel: [...b.state.velocity], respawnAt: b.respawnAt })) }),
+      botsInfo: () => ({ navReady: !!navGraph, navNodes: navGraph ? navGraph.nodes.length : 0, gameClock, kills, deaths, bots: [...bots.values()].map((b) => ({ id: b.id, name: b.name, o: [...b.state.origin], hp: b.health, dead: b.dead, kills: b.kills, deaths: b.deaths, weapon: b.weaponId, pathLen: b.path ? b.path.length : null, pathIdx: b.pathIdx, moveYaw: b.moveYaw, onground: b.state.onground, vel: [...b.state.velocity], respawnAt: b.respawnAt })) }),
       pickups: () => pickups.map((p) => ({ id: p.weaponId, o: [...p.origin] })),
       netInfo: () => ({
         connected: !!(net && net.connected),

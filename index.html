@@ -171,6 +171,7 @@
   .field { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:8px 0; font-size:13px; color:#cfe; }
   .field input[type=range]{ width:150px; }
   .field input[type=text]{ width:130px; background:#0e1620; border:1px solid #2f4150; border-radius:6px; color:#dff; padding:5px 9px; font-family:inherit; }
+  #mp-invite { width:190px; font-size:11px; color:var(--accent); }
   .field .val{ color:var(--accent); width:46px; text-align:right; font-variant-numeric:tabular-nums; }
   .row2 { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .btn { text-decoration:none; color:#cfe; background:#16212c; border:1px solid #2f4150; border-radius:7px; padding:6px 13px; font-size:13px; cursor:pointer; font-family:inherit; }
@@ -285,10 +286,12 @@
         <div class="sec">
           <h2>Multiplayer</h2>
           <div class="field"><span>Name</span><input id="mp-name" type="text" maxlength="16" placeholder="Surfer" /></div>
-          <div class="field"><span>Room</span><span class="row2"><input id="mp-room" type="text" value="public" maxlength="24" /><button class="btn" id="mp-join" type="button">Leave</button></span></div>
+          <div class="field"><span>Server</span><span class="row2"><button class="btn" id="mp-create" type="button">+ Create server</button></span></div>
+          <div class="field"><span>Join code</span><span class="row2"><input id="mp-room" type="text" value="public" maxlength="24" placeholder="room code" /><button class="btn" id="mp-join" type="button">Leave</button></span></div>
+          <div class="field" id="mp-invite-row" style="display:none"><span>Invite link</span><span class="row2"><input id="mp-invite" type="text" readonly /><button class="btn" id="mp-copy" type="button">Copy</button></span></div>
           <div class="field"><span>Status</span><span class="mpstat" id="mp-status">connecting…</span></div>
           <div class="field"><span>Bots</span><span class="row2"><button class="btn" id="mp-addbot" type="button" disabled>+ Add Bot</button><button class="btn" id="mp-clearbot" type="button" disabled>Clear</button><span class="mpstat" id="mp-botcount">0</span></span></div>
-          <p class="mpnote" id="mp-note">public match: no noclip / teleport (fair play). rename the room to start your own match where everything is enabled.</p>
+          <p class="mpnote" id="mp-note">public match: no noclip / teleport / bots (fair play). Create a server to start your own match where everything is enabled.</p>
           <h2 style="margin-top:16px">Settings</h2>
           <div class="field"><span>Sensitivity</span><input id="set-sens" type="range" min="0.5" max="6" step="0.1" /><span class="val" id="set-sens-v">2.2</span></div>
           <div class="field"><span>FOV</span><input id="set-fov" type="range" min="70" max="120" step="1" /><span class="val" id="set-fov-v">90</span></div>
