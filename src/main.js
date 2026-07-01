@@ -17,6 +17,9 @@ import { Input } from './input.js';
 import { HUD } from './hud.js';
 import { FIXED_DT, HULL, CONTENTS, CVAR } from './constants.js';
 import { angleVectors, copy } from './vec.js';
+import { loadNav, NavGraph } from './nav.js';
+import { generateNavGraph } from './navgen.js';
+import { Bot } from './bots.js';
 
 const statusEl = document.getElementById('status');
 const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };
@@ -132,6 +135,12 @@ async function loadWadTextures(bsp) {
 let world, state, input, hud, viewmodel, entities, weapons;
 let net, remotePlayers;
 let bounds, killZ, spawn;
+
+// ---- Local AI bots (never networked; see applyRoomRules for room gating) --
+let navGraph = null; // NavGraph for the current map, or null if unavailable
+const bots = new Map(); // id -> Bot
+let botIdSeq = 0;
+let gameClock = 0; // monotonic clock driven by the fixed physics step, for bot timers
 let prevOrigin;
 let accumulator = 0;
 let lastT = performance.now() / 1000;
@@ -428,6 +437,78 @@ function stepPhysics(dt) {
   // now simulate). killZ is just a last-resort net for maps without them, so
   // normal jumps/landings never reset you.
   if (state.origin[2] < killZ || !Number.isFinite(state.origin[2])) respawn();
+
+  gameClock += dt;
+  tickBots(dt);
+}
+
+// Small local weapon-spread helper (mirrors weapons.js's private spreadDir so
+// bots.js doesn't need to reach into Weapons internals).
+function jitterDir(dir, spread) {
+  if (spread <= 0) return dir;
+  const [x, y, z] = dir;
+  const n = Math.hypot(
+    x + (Math.random() - 0.5) * 2 * spread,
+    y + (Math.random() - 0.5) * 2 * spread,
+    z + (Math.random() - 0.5) * 2 * spread,
+  );
+  return [
+    (x + (Math.random() - 0.5) * 2 * spread) / n,
+    (y + (Math.random() - 0.5) * 2 * spread) / n,
+    (z + (Math.random() - 0.5) * 2 * spread) / n,
+  ];
+}
+
+function pickBotSpawn() {
+  const all = (spawn && spawn.all) || [{ origin: [0, 0, 0], yaw: 0 }];
+  const s = all[(Math.random() * all.length) | 0];
+  return { origin: settleSpawn(s.origin), yaw: s.yaw };
+}
+
+function addBot() {
+  if (!world) return;
+  if (!navGraph || navGraph.nodes.length === 0) { if (hud) hud.toast('Navmesh not ready for this map yet', '#ff6b6b'); return; }
+  const sp = pickBotSpawn();
+  const id = `bot_${botIdSeq++}`;
+  bots.set(id, new Bot(id, sp.origin, sp.yaw));
+  updateBotUI();
+}
+
+function clearBots() {
+  for (const id of bots.keys()) remotePlayers && remotePlayers.remove(id);
+  bots.clear();
+  updateBotUI();
+}
+
+function updateBotUI() {
+  const el = document.getElementById('mp-botcount');
+  if (el) el.textContent = String(bots.size);
+}
+
+// Runs inside the fixed physics step so bot movement/collision stays in
+// lockstep with the player's own runTick, at the same 100Hz.
+function tickBots(dt) {
+  if (bots.size === 0) return;
+  const viewZ = state.ducking ? HULL.DUCK.viewZ : HULL.STAND.viewZ;
+  const target = { originGS: state.origin, eyeGS: [state.origin[0], state.origin[1], state.origin[2] + viewZ] };
+  for (const bot of bots.values()) {
+    if (bot.dead) {
+      if (bot.respawnAt != null && gameClock >= bot.respawnAt) {
+        const sp = pickBotSpawn();
+        bot.respawn(sp.origin, sp.yaw);
+      }
+      continue;
+    }
+    const fired = bot.think({ world, navGraph, dt, now: gameClock, target });
+    if (fired) {
+      if (weapons) weapons.remoteShot({ o: fired.eyeGS, y: fired.aimYaw, p: fired.aimPitch, w: bot.weaponId });
+      const { forward } = angleVectors(fired.aimPitch, fired.aimYaw);
+      const dir = jitterDir(forward, fired.spec.spread);
+      const bodyHit = raySphere(fired.eyeGS, dir, state.origin, 22);
+      const headHit = raySphere(fired.eyeGS, dir, [state.origin[0], state.origin[1], state.origin[2] + 30], 13);
+      if (bodyHit != null || headHit != null) applyDamage(fired.dmg, bot.name, bot.state.origin);
+    }
+  }
 }
 
 // ---- Camera ----------------------------------------------------------------
@@ -559,6 +640,16 @@ function frame(nowMs) {
     runstate: runStarted ? 'running' : 'ready',
     ammo: weapons ? weapons.ammoState() : null,
   });
+
+  // local AI bots: piggyback on RemotePlayers for rendering, scoreboard and
+  // (via playerHitTest) being hittable by the local player's weapon — they're
+  // never networked, so this happens purely client-side.
+  if (remotePlayers) {
+    for (const [id, bot] of bots) {
+      if (bot.dead) { remotePlayers.remove(id); continue; }
+      remotePlayers.update(id, { o: bot.state.origin, y: bot.facingYaw, hp: bot.health, nm: bot.name, k: bot.kills, d: bot.deaths, pk: 0 });
+    }
+  }
 
   // multiplayer: interpolate remote avatars + broadcast our state at ~20 Hz
   if (remotePlayers) remotePlayers.render(dt);
@@ -732,6 +823,21 @@ async function boot() {
       spawn = parseSpawn(bsp);
       entities = new Entities(bsp, world);
       stats = level.stats;
+
+      // Bot navigation: prefer a real shipped .nav (precise, e.g. de_dust2's
+      // official CS 1.6 bot waypoints) and fall back to sampling a walkable-
+      // floor navmesh from the BSP + collision world otherwise. Non-blocking —
+      // bots just aren't addable until this resolves.
+      (async () => {
+        try {
+          const navData = await loadNav(`assets/maps/${MAP_NAME}.nav`);
+          navGraph = NavGraph.fromNavAreas(navData.areas);
+          console.log(`[surf] bot nav: real .nav loaded (${navGraph.nodes.length} areas)`);
+        } catch {
+          navGraph = generateNavGraph(bsp, world);
+          console.log(`[surf] bot nav: generated navmesh (${navGraph.nodes.length} nodes)`);
+        }
+      })();
       worldMins = bsp.models[0].mins; worldMaxs = bsp.models[0].maxs;
       console.log(`[surf] faces=${level.stats.drawn} lit=${level.stats.lit} solidModels=${world.solidModels.length}`);
     }
@@ -792,8 +898,18 @@ async function boot() {
     weapons.masterVol = SETTINGS.vol / 100;
     weapons.playerHitTest = playerHitTest;
     weapons.onPlayerHit = (id, dmg) => {
-      if (net && net.connected) net.sendHitTo(id, { dmg, by: playerName });
       if (hud) hud.hitMarker();
+      const bot = bots.get(id);
+      if (bot) {
+        if (bot.takeDamage(dmg)) {
+          kills++;
+          addKill(`<b>${escHtml(playerName)}</b> ▸ ${escHtml(bot.name)}`);
+          if (hud) hud.toast(`Fragged ${escHtml(bot.name)}`, '#7fd1ae');
+          bot.respawnAt = gameClock + 3;
+        }
+        return;
+      }
+      if (net && net.connected) net.sendHitTo(id, { dmg, by: playerName });
     };
     weapons.loadSounds({
       usp: 'assets/sounds/usp.wav', m4a1: 'assets/sounds/m4a1.wav', m3: 'assets/sounds/m3.wav',
@@ -890,10 +1006,15 @@ async function boot() {
     function applyRoomRules(room) {
       const custom = room && room !== 'public';
       if (input) input.setCheats(custom);
+      if (!custom) clearBots(); // bots are a custom-room feature, same bucket as noclip
+      const addBotBtn = document.getElementById('mp-addbot');
+      const clearBotBtn = document.getElementById('mp-clearbot');
+      if (addBotBtn) addBotBtn.disabled = !custom;
+      if (clearBotBtn) clearBotBtn.disabled = !custom;
       const note = document.getElementById('mp-note');
       if (note) note.textContent = custom
-        ? 'custom match: noclip + checkpoints enabled.'
-        : 'public match: no noclip / teleport (fair play). rename the room to start your own match where everything is enabled.';
+        ? 'custom match: noclip + checkpoints + bots enabled.'
+        : 'public match: no noclip / teleport / bots (fair play). rename the room to start your own match where everything is enabled.';
     }
     async function connectMP(room) {
       if (mpStatus) mpStatus.textContent = 'connecting…';
@@ -918,6 +1039,10 @@ async function boot() {
         }
       });
     }
+    const addBotBtn = document.getElementById('mp-addbot');
+    const clearBotBtn = document.getElementById('mp-clearbot');
+    if (addBotBtn) addBotBtn.addEventListener('click', addBot);
+    if (clearBotBtn) clearBotBtn.addEventListener('click', clearBots);
     // Multiplayer ON by default — auto-join the room as soon as we boot.
     connectMP((roomInput && roomInput.value.trim()) || 'public');
 
@@ -958,7 +1083,7 @@ async function boot() {
       worldMaxs,
       getState: () => ({
         origin: [...state.origin], velocity: [...state.velocity],
-        onground: state.onground, ducking: state.ducking, speed: speed2d(state),
+        onground: state.onground, ducking: state.ducking, speed: speed2d(state), health,
       }),
       setState: (o, v) => { if (o) state.origin = [...o]; if (v) state.velocity = [...v]; prevOrigin = copy(state.origin); },
       setAir: () => { state.onground = false; state.groundNormal = null; },
@@ -968,7 +1093,10 @@ async function boot() {
       setVMEuler: (x, y, z) => viewmodel && viewmodel.setVMEuler(x, y, z),
       vmReady: () => !!(viewmodel && Object.keys(viewmodel.weapons).length),
       selectWeapon: (n) => { if (input) input.weapon = n; if (viewmodel) viewmodel.select(n); },
-      addBot: (o, y) => remotePlayers && remotePlayers.update('TESTBOT', { o, y: y || 0, nm: 'BOT' }),
+      addTestAvatar: (o, y) => remotePlayers && remotePlayers.update('TESTBOT', { o, y: y || 0, nm: 'BOT' }), // static, non-AI, for avatar-rendering tests
+      spawnBot: () => addBot(), // real AI bot; test hook so headless tests don't need the (room-gated) UI button
+      clearBots: () => clearBots(),
+      botsInfo: () => ({ navReady: !!navGraph, navNodes: navGraph ? navGraph.nodes.length : 0, gameClock, bots: [...bots.values()].map((b) => ({ id: b.id, name: b.name, o: [...b.state.origin], hp: b.health, dead: b.dead, weapon: b.weaponId, pathLen: b.path ? b.path.length : null, pathIdx: b.pathIdx, moveYaw: b.moveYaw, onground: b.state.onground, vel: [...b.state.velocity], respawnAt: b.respawnAt })) }),
       pickups: () => pickups.map((p) => ({ id: p.weaponId, o: [...p.origin] })),
       netInfo: () => ({
         connected: !!(net && net.connected),
@@ -981,6 +1109,9 @@ async function boot() {
       // movement maths from level collision for testing.
       tickWith: (cmd, mockWorld, dt = FIXED_DT) => { runTick(state, cmd, mockWorld, { autohop: false }, dt); return speed2d(state); },
       trace: (a, b, hull = 1) => world.traceHull(a, b, hull),
+      traceBullet: (a, b) => world.traceBullet(a, b),
+      debugHitTest: (eye, dir) => playerHitTest(eye, dir),
+      debugDamageBot: (id, dmg) => weapons.onPlayerHit(id, dmg),
       rendererInfo: () => ({ calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }),
     };
 

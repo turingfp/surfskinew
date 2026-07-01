@@ -46,6 +46,10 @@ const SPECS = {
   m249: spec({ label: 'M249', sound: 'm249', rate: 0.08, auto: true, kick: 0.6, spread: 0.03, dmg: 32, clip: 100, reserve: 100, reload: 4.5, rld: 'rifle' }),
 };
 
+// Read-only accessor so other systems (bots.js) can fire with real weapon
+// balance (damage/rate/spread/sound) without duplicating the table.
+export function weaponSpec(name) { return SPECS[name]; }
+
 function makeFlashTexture() {
   const s = 64; const c = document.createElement('canvas'); c.width = c.height = s;
   const g = c.getContext('2d');
