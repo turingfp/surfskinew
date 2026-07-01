@@ -28,13 +28,13 @@ function resolveSeqs(seqs) {
 }
 
 // Per-weapon nudge [x, y, z] in rig space, on top of the shared base placement.
-// Pistols (rhand bodypart skipped) end up sitting a little high after
-// bbox-centering, so we lower them slightly to read at hand height — kept
-// small since the camera's near cone at this depth leaves little headroom.
-// The M3's pump/stock hangs low after centering and needs the opposite
-// (raise) nudge to keep it off the bottom edge.
+// The shared base sits low so long guns rise into frame from the bottom-right
+// (see the base-placement note below). Pistols are short, so at that same low
+// base their whole body drops off the bottom edge — we raise them back up so
+// the grip/hand still reads at the bottom-right corner. The M3's pump/stock
+// hangs low after centering and needs a similar raise.
 const VM_OFFSET = {
-  usp: [0, -0.03, 0.02], deagle: [0, -0.02, 0.01], glock: [0, -0.03, 0.02],
+  usp: [0, 0.03, 0.02], deagle: [0, 0.04, 0.01], glock: [0, 0.03, 0.02],
   m3: [0, 0.05, 0],
 };
 
@@ -77,16 +77,19 @@ export class Viewmodel {
     this.scene.add(rim);
 
     this.rig = new THREE.Group();
-    // Bottom-right placement in view space (camera looks down -Z). Every MDL
-    // weapon is normalized to a 0.5-unit longest dimension (barrel/arm axis ->
-    // local Z, via buildAnimatedModel's centering), so half its depth (0.25)
-    // must clear the camera comfortably. At -0.46 the near face sat at only
-    // -0.21 — well inside a 50deg FOV's near cone, clipping the whole gun out
-    // of frame. Verified by projecting each weapon's world-space bbox through
-    // the camera (Vector3.project) and reading back actual rendered pixels;
-    // -0.85 keeps the near face at -0.6, comfortably inside the frustum for
-    // every MDL weapon (pistol grips through the AWP's long barrel).
-    this.baseX = 0.5; this.baseY = -0.02;
+    // Bottom-right placement in view space (camera looks down -Z). Depth (-0.85)
+    // keeps the near face at -0.6, comfortably inside the 50deg FOV's near cone
+    // for every MDL weapon (pistol grips through the AWP's long barrel) — at
+    // -0.46 the near face sat at -0.21 and clipped the gun out of frame.
+    // baseY is low (-0.14, not near-centered) on purpose: a first-person
+    // weapon is held by hands *below* the camera, so it must rise into frame
+    // from the bottom-right corner. With baseY near 0 the gun floated at eye
+    // level and read as sliding in from the right edge rather than being held.
+    // baseX (0.42) pulls it off the right edge so the forearm enters from the
+    // corner, not the side. Per-weapon VM_OFFSET raises the short pistols back
+    // up from this low base. Verified visually per weapon (Vector3.project +
+    // rendered pixels) for AK/M4/AWP/M3 and the USP/Deagle/Glock pistols.
+    this.baseX = 0.42; this.baseY = -0.14;
     this.rig.position.set(this.baseX, this.baseY, -0.85);
     this.scene.add(this.rig);
 
