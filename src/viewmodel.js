@@ -85,13 +85,15 @@ export class Viewmodel {
     this.bobT = 0;
     this.recoil = 0; // 0..1, decays; kicks the gun back + up when firing
     this.reloadT = 0; this.reloadDur = 0; // reload dip animation
-    // Fine-tune on top of the baked axis remap. Without this, remapVM alone
-    // orients the barrel almost flat across the screen (its length mostly in
-    // the view-space X/Y plane) — the gun reads as a side profile instead of
-    // pointing away from the player. -0.5 rad of yaw rotates the barrel
-    // substantially into -Z (depth), restoring visible foreshortening and a
-    // natural held-weapon angle. Verified visually across all six MDL weapons.
-    this._vmEuler = [0, -0.5, 0];
+    // Fine-tune on top of the baked axis remap. remapVM alone points the
+    // barrel straight down the camera's own view axis, with the receiver's
+    // natural width reading as a nearly flat, side-on silhouette instead of
+    // the classic three-quarter "held up and angled across the screen" look.
+    // Pitching up 0.3 rad + yawing 0.1 rad tilts the muzzle toward the
+    // upper-left with the grip anchored lower-right, matching the reference
+    // CS 1.6 framing. Verified against a real AK47 screenshot (front sight
+    // and stock landmarks measured directly) and all six MDL weapons.
+    this._vmEuler = [-0.3, 0.1, 0];
     // skeletal weapon animation state (current weapon): idle loop, or a one-shot
     // shoot / reload / draw that returns to idle when it finishes.
     this.anim = { mode: 'idle', seq: -1, frame: 0, fps: 16, loop: true, dur: 0 };
