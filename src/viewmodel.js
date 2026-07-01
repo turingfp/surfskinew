@@ -7,10 +7,13 @@ import { GLTFLoader } from '../vendor/jsm/loaders/GLTFLoader.js';
 import { loadMDL } from './mdl.js';
 import { buildAnimatedModel } from './render.js';
 
-// v_ model axes -> view-model camera space: (x, y, z) -> (-x, z, y).
+// v_ model axes -> view-model camera space. GoldSrc renders view models in
+// the player's frame with yaw 0 = facing +X: forward +X, left +Y, up +Z
+// (the idle-pose bone transforms bake this orientation in). Three.js camera
+// space is right +X, up +Y, forward -Z, so: (x, y, z) -> (-y, z, -x).
 function remapVM(src) {
   const out = new Float32Array(src.length);
-  for (let i = 0; i < src.length; i += 3) { out[i] = -src[i]; out[i + 1] = src[i + 2]; out[i + 2] = src[i + 1]; }
+  for (let i = 0; i < src.length; i += 3) { out[i] = -src[i + 1]; out[i + 1] = src[i + 2]; out[i + 2] = -src[i]; }
   return out;
 }
 
@@ -27,26 +30,18 @@ function resolveSeqs(seqs) {
   };
 }
 
-// Per-weapon nudge [x, y, z] in rig space, on top of the shared base placement.
-// The shared base sits low so long guns rise into frame from the bottom-right
-// (see the base-placement note below). Pistols are short, so at that same low
-// base their whole body drops off the bottom edge — we raise them back up so
-// the grip/hand still reads at the bottom-right corner. The M3's pump/stock
-// hangs low after centering and needs a similar raise.
-const VM_OFFSET = {
-  usp: [0, 0.03, 0.02], deagle: [0, 0.04, 0.01], glock: [0, 0.03, 0.02],
-  m3: [0, 0.05, 0],
-};
-
-// Per-weapon rotation override [pitch, yaw, roll], replacing DEFAULT_EULER.
-// Rifles/snipers/shotguns all read well at one shared angle, but pistols are
-// short enough relative to their width that the SAME rotation over-rotates
-// them (verified visually per weapon, not just by category — even USP and
-// Deagle, both one-handed pistols, needed different values here).
-const DEFAULT_EULER = [-0.3, 0.1, 0];
-const VM_EULER = {
-  usp: [0.15, 0.1, 0], deagle: [0.1, 0.08, 0], glock: [0.15, 0.1, 0],
-};
+// GoldSrc v_ models are authored IN EYE SPACE: the model origin is the
+// player's eye, and the artists placed gun/hands/arms exactly where they
+// should appear from that eye (stock near the face, muzzle ~30in into the
+// scene, forearms entering from below the view). The engine renders them
+// with NO transform beyond the player FOV. So we must not bbox-center,
+// size-normalize, or hand-rotate them — that turns the authored first-person
+// pose into a side-view prop. The only transforms we apply are the axis
+// remap (remapVM) and one uniform unit-conversion scale shared by every
+// weapon, which preserves the authored relative sizes (a USP is small in
+// frame, an AWP is long) and is otherwise invisible: scaling geometry
+// uniformly about the eye doesn't change its projection.
+const VM_SCALE = 0.025; // GoldSrc inches -> view units (AWP ~36in -> ~0.9)
 
 // Soft additive muzzle-flash sprite (no asset to ship).
 function makeFlashTexture() {
@@ -63,7 +58,11 @@ function makeFlashTexture() {
 export class Viewmodel {
   constructor() {
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
+    // CS 1.6 renders view models at default_fov 90 (horizontal at 4:3), i.e.
+    // ~73.7deg vertical — three.js FOV is vertical, so use that. The previous
+    // 50deg was far too narrow: it zoomed the weapon in like a telephoto shot,
+    // flattening the foreshortening that makes a viewmodel read as "held".
+    this.camera = new THREE.PerspectiveCamera(73.7, 1, 0.01, 100);
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 1.35));
     const key = new THREE.DirectionalLight(0xffffff, 1.7);
@@ -77,20 +76,14 @@ export class Viewmodel {
     this.scene.add(rim);
 
     this.rig = new THREE.Group();
-    // Bottom-right placement in view space (camera looks down -Z). Depth (-0.85)
-    // keeps the near face at -0.6, comfortably inside the 50deg FOV's near cone
-    // for every MDL weapon (pistol grips through the AWP's long barrel) — at
-    // -0.46 the near face sat at -0.21 and clipped the gun out of frame.
-    // baseY is low (-0.14, not near-centered) on purpose: a first-person
-    // weapon is held by hands *below* the camera, so it must rise into frame
-    // from the bottom-right corner. With baseY near 0 the gun floated at eye
-    // level and read as sliding in from the right edge rather than being held.
-    // baseX (0.42) pulls it off the right edge so the forearm enters from the
-    // corner, not the side. Per-weapon VM_OFFSET raises the short pistols back
-    // up from this low base. Verified visually per weapon (Vector3.project +
-    // rendered pixels) for AK/M4/AWP/M3 and the USP/Deagle/Glock pistols.
-    this.baseX = 0.42; this.baseY = -0.14;
-    this.rig.position.set(this.baseX, this.baseY, -0.85);
+    // The rig sits AT the camera: v_ models are eye-space authored (see
+    // VM_SCALE note above), so their origin must coincide with the camera for
+    // the authored first-person pose — hands from the bottom of the frame,
+    // barrel foreshortened toward the crosshair — to project correctly. All
+    // bob/recoil/dip motion in update() is a small excursion around this
+    // origin, exactly like GoldSrc's view-model bob.
+    this.baseX = 0; this.baseY = 0; this.baseZ = 0;
+    this.rig.position.set(this.baseX, this.baseY, this.baseZ);
     this.scene.add(this.rig);
 
     this.weapons = {};
@@ -98,9 +91,8 @@ export class Viewmodel {
     this.bobT = 0;
     this.recoil = 0; // 0..1, decays; kicks the gun back + up when firing
     this.reloadT = 0; this.reloadDur = 0; // reload dip animation
-    // Manual test-only override (see setVMEuler) — null means "use each
-    // weapon's own VM_EULER entry (or DEFAULT_EULER)", which is what
-    // _makeMDLWeapon actually applies per weapon at load time.
+    // Manual test-only override (see setVMEuler) — null means identity: the
+    // eye-space v_ models need no rotation beyond the axis remap.
     this._vmEuler = null;
     // skeletal weapon animation state (current weapon): idle loop, or a one-shot
     // shoot / reload / draw that returns to idle when it finishes.
@@ -132,9 +124,9 @@ export class Viewmodel {
     this._flashTtl = 0.045;
   }
 
-  // Test-only: force EVERY loaded weapon to the same rotation, overriding
-  // their individual VM_EULER entries. Used for comparing candidate values
-  // while tuning; normal gameplay never calls this.
+  // Test-only: force EVERY loaded weapon to the same rotation (default is
+  // identity). Used for comparing candidate values while tuning; normal
+  // gameplay never calls this.
   setVMEuler(x, y, z) {
     this._vmEuler = [x, y, z];
     for (const w of Object.values(this.weapons)) if (w.rotation) w.rotation.set(x, y, z);
@@ -193,26 +185,20 @@ export class Viewmodel {
   }
 
   _makeMDLWeapon(data, name) {
-    // Animated geometry: the CS v_ models' long axis (barrel/arm) is model Y, up
-    // is model Z. Map to the view-model camera (looks -Z, +Y up): three = (-X,
-    // Z, Y). A small wrap euler then fine-tunes. buildAnimatedModel drives the
-    // idle / shoot / reload / draw sequences by deforming this geometry.
+    // Animated geometry in the GoldSrc player frame, remapped to camera space
+    // by remapVM. buildAnimatedModel drives the idle / shoot / reload / draw
+    // sequences by deforming this geometry.
     const am = buildAnimatedModel(data, { remap: remapVM });
     const inner = am.group;
     inner.traverse((m) => { if (m.isMesh) m.frustumCulled = false; });
-    // center + scale + orient like a held first-person weapon (from the idle pose)
-    const box = new THREE.Box3().setFromObject(inner);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    inner.position.sub(center);
+    // Eye-space model: keep the authored pose. One shared unit-conversion
+    // scale, no centering, no rotation (the artists already framed it for a
+    // first-person camera at the origin). setVMEuler remains as a manual
+    // tuning hook but defaults to identity.
     const wrap = new THREE.Group();
     wrap.add(inner);
-    const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    wrap.scale.setScalar(0.5 / maxDim);
-    const euler = this._vmEuler || VM_EULER[name] || DEFAULT_EULER;
-    wrap.rotation.set(euler[0], euler[1], euler[2]);
-    const off = VM_OFFSET[name];
-    if (off) wrap.position.set(off[0], off[1], off[2]);
+    wrap.scale.setScalar(VM_SCALE);
+    if (this._vmEuler) wrap.rotation.set(this._vmEuler[0], this._vmEuler[1], this._vmEuler[2]);
     wrap.userData.anim = am;
     wrap.userData.seqs = resolveSeqs(data.anim.sequences);
     wrap.userData.muzzle = computeMuzzle(wrap);
@@ -297,7 +283,10 @@ export class Viewmodel {
     }
     this.rig.position.y = this.baseY + Math.sin(this.bobT) * amp - this.recoil * 0.01 - dip * 0.14;
     this.rig.position.x = this.baseX + Math.cos(this.bobT * 0.5) * amp * 0.6;
-    this.rig.position.z = -0.85 + this.recoil * 0.05;
+    // Recoil pulls the gun straight back toward the shoulder (+Z). Kept small:
+    // the nearest authored geometry sits ~0.1 units from the eye and must not
+    // cross the near plane at full recoil.
+    this.rig.position.z = this.baseZ + this.recoil * 0.03;
     this.rig.rotation.x = -this.recoil * 0.18 + dip * 0.5;
 
     // Show at full opacity the frame it fires, then fade — set opacity from the
@@ -312,12 +301,29 @@ export class Viewmodel {
   }
 }
 
-// Barrel tip of a built weapon group, in rig space: front-centre of its bbox.
-// The view models are oriented so the barrel points -Z, so the muzzle is the
-// most-forward (min Z) point at the bbox centre in X/Y.
+// Barrel tip of a built weapon group, in rig space. The barrel points -Z, so
+// the muzzle is the front-most geometry — but the model's bbox also spans the
+// arm sweeping down toward the corner, so the bbox centre sits off the barrel
+// line. Instead, average the vertices within a thin slab at min Z: that's the
+// muzzle crown itself.
 function computeMuzzle(group) {
   group.updateMatrixWorld(true);
-  const b = new THREE.Box3().setFromObject(group);
-  if (!isFinite(b.min.z)) return { x: 0, y: 0, z: -0.32 };
-  return { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: b.min.z - 0.02 };
+  const v = new THREE.Vector3();
+  let minZ = Infinity;
+  const verts = [];
+  group.traverse((m) => {
+    if (!m.isMesh) return;
+    const pos = m.geometry.getAttribute('position');
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+      verts.push(v.x, v.y, v.z);
+      if (v.z < minZ) minZ = v.z;
+    }
+  });
+  if (!isFinite(minZ)) return { x: 0, y: 0, z: -0.32 };
+  let sx = 0, sy = 0, n = 0;
+  for (let i = 0; i < verts.length; i += 3) {
+    if (verts[i + 2] < minZ + 0.03) { sx += verts[i]; sy += verts[i + 1]; n++; }
+  }
+  return { x: sx / n, y: sy / n, z: minZ - 0.02 };
 }
