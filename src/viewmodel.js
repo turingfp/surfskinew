@@ -38,6 +38,16 @@ const VM_OFFSET = {
   m3: [0, 0.05, 0],
 };
 
+// Per-weapon rotation override [pitch, yaw, roll], replacing DEFAULT_EULER.
+// Rifles/snipers/shotguns all read well at one shared angle, but pistols are
+// short enough relative to their width that the SAME rotation over-rotates
+// them (verified visually per weapon, not just by category — even USP and
+// Deagle, both one-handed pistols, needed different values here).
+const DEFAULT_EULER = [-0.3, 0.1, 0];
+const VM_EULER = {
+  usp: [0.15, 0.1, 0], deagle: [0.1, 0.08, 0], glock: [0.15, 0.1, 0],
+};
+
 // Soft additive muzzle-flash sprite (no asset to ship).
 function makeFlashTexture() {
   const s = 64; const c = document.createElement('canvas'); c.width = c.height = s;
@@ -85,15 +95,10 @@ export class Viewmodel {
     this.bobT = 0;
     this.recoil = 0; // 0..1, decays; kicks the gun back + up when firing
     this.reloadT = 0; this.reloadDur = 0; // reload dip animation
-    // Fine-tune on top of the baked axis remap. remapVM alone points the
-    // barrel straight down the camera's own view axis, with the receiver's
-    // natural width reading as a nearly flat, side-on silhouette instead of
-    // the classic three-quarter "held up and angled across the screen" look.
-    // Pitching up 0.3 rad + yawing 0.1 rad tilts the muzzle toward the
-    // upper-left with the grip anchored lower-right, matching the reference
-    // CS 1.6 framing. Verified against a real AK47 screenshot (front sight
-    // and stock landmarks measured directly) and all six MDL weapons.
-    this._vmEuler = [-0.3, 0.1, 0];
+    // Manual test-only override (see setVMEuler) — null means "use each
+    // weapon's own VM_EULER entry (or DEFAULT_EULER)", which is what
+    // _makeMDLWeapon actually applies per weapon at load time.
+    this._vmEuler = null;
     // skeletal weapon animation state (current weapon): idle loop, or a one-shot
     // shoot / reload / draw that returns to idle when it finishes.
     this.anim = { mode: 'idle', seq: -1, frame: 0, fps: 16, loop: true, dur: 0 };
@@ -124,7 +129,9 @@ export class Viewmodel {
     this._flashTtl = 0.045;
   }
 
-  // Re-orient all loaded MDL weapons (used to tune the view-model orientation).
+  // Test-only: force EVERY loaded weapon to the same rotation, overriding
+  // their individual VM_EULER entries. Used for comparing candidate values
+  // while tuning; normal gameplay never calls this.
   setVMEuler(x, y, z) {
     this._vmEuler = [x, y, z];
     for (const w of Object.values(this.weapons)) if (w.rotation) w.rotation.set(x, y, z);
@@ -199,7 +206,8 @@ export class Viewmodel {
     wrap.add(inner);
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
     wrap.scale.setScalar(0.5 / maxDim);
-    wrap.rotation.set(this._vmEuler[0], this._vmEuler[1], this._vmEuler[2]);
+    const euler = this._vmEuler || VM_EULER[name] || DEFAULT_EULER;
+    wrap.rotation.set(euler[0], euler[1], euler[2]);
     const off = VM_OFFSET[name];
     if (off) wrap.position.set(off[0], off[1], off[2]);
     wrap.userData.anim = am;
