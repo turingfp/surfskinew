@@ -28,10 +28,14 @@ function resolveSeqs(seqs) {
 }
 
 // Per-weapon nudge [x, y, z] in rig space, on top of the shared base placement.
-// Pistols (rhand bodypart skipped) end up sitting high after bbox-centering, so
-// we lower them so the gun reads at hand height rather than mid-screen.
+// Pistols (rhand bodypart skipped) end up sitting a little high after
+// bbox-centering, so we lower them slightly to read at hand height — kept
+// small since the camera's near cone at this depth leaves little headroom.
+// The M3's pump/stock hangs low after centering and needs the opposite
+// (raise) nudge to keep it off the bottom edge.
 const VM_OFFSET = {
-  usp: [0, -0.13, 0.02], deagle: [0, -0.09, 0.01], glock: [0, -0.12, 0.02],
+  usp: [0, -0.03, 0.02], deagle: [0, -0.02, 0.01], glock: [0, -0.03, 0.02],
+  m3: [0, 0.05, 0],
 };
 
 // Soft additive muzzle-flash sprite (no asset to ship).
@@ -63,9 +67,17 @@ export class Viewmodel {
     this.scene.add(rim);
 
     this.rig = new THREE.Group();
-    // bottom-right placement in view space (camera looks down -Z)
-    this.baseX = 0.2; this.baseY = -0.16;
-    this.rig.position.set(this.baseX, this.baseY, -0.46);
+    // Bottom-right placement in view space (camera looks down -Z). Every MDL
+    // weapon is normalized to a 0.5-unit longest dimension (barrel/arm axis ->
+    // local Z, via buildAnimatedModel's centering), so half its depth (0.25)
+    // must clear the camera comfortably. At -0.46 the near face sat at only
+    // -0.21 — well inside a 50deg FOV's near cone, clipping the whole gun out
+    // of frame. Verified by projecting each weapon's world-space bbox through
+    // the camera (Vector3.project) and reading back actual rendered pixels;
+    // -0.85 keeps the near face at -0.6, comfortably inside the frustum for
+    // every MDL weapon (pistol grips through the AWP's long barrel).
+    this.baseX = 0.5; this.baseY = -0.02;
+    this.rig.position.set(this.baseX, this.baseY, -0.85);
     this.scene.add(this.rig);
 
     this.weapons = {};
@@ -110,7 +122,12 @@ export class Viewmodel {
     for (const w of Object.values(this.weapons)) if (w.rotation) w.rotation.set(x, y, z);
   }
 
-  kick(amount = 0.6) { this.recoil = Math.min(1.4, this.recoil + amount); this._startAnim('shoot'); }
+  // Positional recoil nudge only (used for the small "punch" on weapon switch
+  // / pickup too). shoot() additionally plays the skeletal fire animation —
+  // switching weapons should never trigger a shoot pose.
+  kick(amount = 0.6) { this.recoil = Math.min(1.4, this.recoil + amount); }
+
+  shoot(amount = 0.6) { this.kick(amount); this._startAnim('shoot'); }
 
   startReload(dur) { this.reloadDur = dur; this.reloadT = dur; this._pendingDur = dur; this._startAnim('reload'); }
 
@@ -261,7 +278,7 @@ export class Viewmodel {
     }
     this.rig.position.y = this.baseY + Math.sin(this.bobT) * amp - this.recoil * 0.01 - dip * 0.14;
     this.rig.position.x = this.baseX + Math.cos(this.bobT * 0.5) * amp * 0.6;
-    this.rig.position.z = -0.46 + this.recoil * 0.05;
+    this.rig.position.z = -0.85 + this.recoil * 0.05;
     this.rig.rotation.x = -this.recoil * 0.18 + dip * 0.5;
 
     // Show at full opacity the frame it fires, then fade — set opacity from the

@@ -950,6 +950,7 @@ async function boot() {
     window.__surf = {
       ready: true,
       scene, // test hook: inspect/tweak materials for visual diagnosis
+      viewmodel, // test hook
       stats,
       bounds,
       spawn,

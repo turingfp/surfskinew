@@ -253,7 +253,7 @@ export class Weapons {
 
   _fire(spec, opts) {
     this._playRaw(spec.sound, spec.vol);
-    if (this.vm) this.vm.kick(spec.kick);
+    if (this.vm) this.vm.shoot(spec.kick);
     this.camPunch += spec.kick * 0.012;
     if (this.onShot) this.onShot({ o: opts.eyeGS.slice(), y: opts.yaw, p: opts.pitch, w: this.current });
 

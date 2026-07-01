@@ -401,11 +401,11 @@ export function buildAnimatedModel(data, { remap = remapModelArray } = {}) {
   const meshes = [];
   let minY = 1e9;
   data.groups.forEach((g) => {
-    const init = remapModelArray(g.positions);
+    const init = remap(g.positions);
     for (let i = 1; i < init.length; i += 3) if (init[i] < minY) minY = init[i];
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(init, 3));
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(remapModelArray(g.normals), 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(remap(g.normals), 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2));
     let mat;
     if (g.tex) {
