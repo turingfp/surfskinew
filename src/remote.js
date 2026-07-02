@@ -60,7 +60,38 @@ export class RemotePlayers {
       run: find('run'),
     };
     this.aimSeq = {};
-    for (const cat of new Set(Object.values(AIM_CATEGORY))) this.aimSeq[cat] = find(`ref_aim_${cat}`);
+    this.shootSeq = {};
+    for (const cat of new Set(Object.values(AIM_CATEGORY))) {
+      this.aimSeq[cat] = find(`ref_aim_${cat}`);
+      this.shootSeq[cat] = find(`ref_shoot_${cat}`);
+    }
+    // Death sequences (played once, corpse holds the final frame). The rig
+    // ships generic deaths plus directional/hit-location variants — pick
+    // randomly for variety.
+    this.deathSeqs = ['death1', 'death2', 'death3', 'head', 'gutshot', 'left', 'back', 'right', 'forward']
+      .map((n) => find(n)).filter((i) => i >= 0);
+  }
+
+  // Flash the third-person fire animation (upper body) on an avatar. Called
+  // when a remote peer's shot arrives or a local bot fires — without this the
+  // arms hold a frozen aim pose no matter how much shooting is going on.
+  notifyShot(id) {
+    const p = this.players.get(id);
+    if (!p || !p.anim || p.dying || !this.seq) return;
+    const cat = p.cur && AIM_CATEGORY[p.cur.w];
+    const seq = cat != null ? this.shootSeq[cat] : -1;
+    if (seq != null && seq >= 0) p.upper = { seq, phase: 0 };
+  }
+
+  // Start a one-shot death animation; the avatar becomes a corpse (no longer
+  // hit-testable via forEach) until the next update() with hp > 0 revives it.
+  die(id) {
+    const p = this.players.get(id);
+    if (!p || p.dying) return;
+    if (!p.anim || !this.deathSeqs || this.deathSeqs.length === 0) { this.remove(id); return; }
+    const seq = this.deathSeqs[(Math.random() * this.deathSeqs.length) | 0];
+    p.dying = { seq, phase: 0 };
+    p.upper = null;
   }
 
   _make(id) {
@@ -92,6 +123,9 @@ export class RemotePlayers {
 
   update(id, data) {
     const p = this.players.get(id) || this._make(id);
+    // A live update for a corpse means it respawned: clear the death pose and
+    // snap (don't smooth) to the new spawn point.
+    if (p.dying && data && data.hp > 0) { p.dying = null; p.seqCur = -1; p.started = false; }
     p.cur = data;
   }
 
@@ -112,8 +146,10 @@ export class RemotePlayers {
     return out;
   }
 
-  // For hit detection: GS origin (centre) of each peer.
-  forEach(cb) { for (const [id, p] of this.players) if (p.cur && p.cur.o) cb(id, p.cur.o, p); }
+  // For hit detection + spawn avoidance: GS origin (centre) of each LIVING
+  // peer. Corpses (p.dying) are skipped so bullets pass through them to live
+  // targets behind, and spawns aren't blocked by a body.
+  forEach(cb) { for (const [id, p] of this.players) if (p.cur && p.cur.o && !p.dying) cb(id, p.cur.o, p); }
 
   get color() { return COLORS; }
   colorFor(id) { const p = this.players.get(id); return p ? p.color : 0xffffff; }
@@ -131,7 +167,19 @@ export class RemotePlayers {
         g.position.y += (ty - g.position.y) * k;
         g.position.z += (tz - g.position.z) * k;
       }
-      if (p.body) p.body.rotation.y = (p.cur.y || 0); // face their yaw
+      if (p.body && !p.dying) p.body.rotation.y = (p.cur.y || 0); // face their yaw
+
+      // Death: play the one-shot sequence full-body and hold the last frame
+      // (the corpse lingers until the respawn update clears p.dying).
+      if (p.dying) {
+        if (p.anim) {
+          const sq = this.templateData.anim.sequences[p.dying.seq];
+          const nf = Math.max(1, (sq && sq.numframes) || 1);
+          p.dying.phase = Math.min(p.dying.phase + dt * ((sq && sq.fps) || 30), nf - 1);
+          p.anim.apply(p.dying.seq, p.dying.phase);
+        }
+        continue;
+      }
 
       if (p.anim && this.seq) {
         // on-screen horizontal speed (three: X/Z are the ground plane)
@@ -150,12 +198,23 @@ export class RemotePlayers {
         const sq = this.templateData.anim.sequences[seq];
         const fps = (sq && sq.fps) || 15;
         p.phase += dt * fps * rate;
-        // Blend the movement sequence (legs) with the held weapon's aim pose
-        // (arms) — without this, arms stay at bind pose (T-pose) since the
-        // walk/run/idle sequences don't include a weapon-holding pose.
-        const cat = AIM_CATEGORY[p.cur.w];
-        const aimSeq = cat != null ? this.aimSeq[cat] : -1;
-        p.anim.applyBlend(seq, p.phase, aimSeq != null ? aimSeq : -1);
+        // Blend the movement sequence (legs) with an upper-body pose: the
+        // one-shot fire animation while it plays (see notifyShot), otherwise
+        // the held weapon's static aim pose — without which the arms stay at
+        // bind pose (T-pose), since walk/run/idle don't pose the arms.
+        let aimSeq = -1, aimFrame = 0;
+        if (p.upper) {
+          const usq = this.templateData.anim.sequences[p.upper.seq];
+          p.upper.phase += dt * ((usq && usq.fps) || 30);
+          if (!usq || p.upper.phase >= usq.numframes - 1) p.upper = null;
+          else { aimSeq = p.upper.seq; aimFrame = p.upper.phase; }
+        }
+        if (aimSeq < 0) {
+          const cat = AIM_CATEGORY[p.cur.w];
+          const a = cat != null ? this.aimSeq[cat] : -1;
+          if (a != null) aimSeq = a;
+        }
+        p.anim.applyBlend(seq, p.phase, aimSeq, aimFrame);
       }
     }
   }

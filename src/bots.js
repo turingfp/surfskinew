@@ -55,6 +55,11 @@ export class Bot {
     this.pathIdx = 0;
     this.repathAt = 0;
     this.fireCooldown = 0.5 + Math.random() * 0.5; // don't all open fire on the same tick
+    // Finite clip, like the player: running dry forces a reload pause, so
+    // firefights have openings instead of one uninterrupted hitscan stream.
+    this.clip = weaponSpec(this.weaponId).clip;
+    this.reloadUntil = 0;
+    this._reloading = false;
     this._stuckAt = 0;
     this._stuckOrigin = origin.slice();
     this._wantJump = false;
@@ -76,6 +81,8 @@ export class Bot {
     this.health = 100;
     this.dead = false;
     this.path = null; this.pathIdx = 0;
+    this.clip = weaponSpec(this.weaponId).clip; // fresh life, fresh loadout (matches the player's respawn)
+    this.reloadUntil = 0; this._reloading = false;
     this._stuckOrigin = origin.slice(); this._stuckAt = 0;
   }
 
@@ -137,10 +144,20 @@ export class Bot {
 
     let fired = null;
     this.fireCooldown -= dt;
-    if (canSee && this.fireCooldown <= 0) {
+    this._reloading = now < this.reloadUntil;
+    if (!this._reloading && canSee && this.fireCooldown <= 0) {
       const spec = weaponSpec(this.weaponId);
-      this.fireCooldown = spec.rate * (1 + Math.random() * 0.4); // a little human irregularity
-      fired = { eyeGS: eye, aimYaw: this.aimYaw, aimPitch: this.aimPitch, dmg: spec.dmg, spec };
+      if (this.clip <= 0) {
+        // dry: hold fire for the weapon's reload time. Refill immediately —
+        // the reloadUntil gate above is what actually keeps the gun silent.
+        this.reloadUntil = now + spec.reload;
+        this.clip = spec.clip;
+        this._reloading = true;
+      } else {
+        this.clip--;
+        this.fireCooldown = spec.rate * (1 + Math.random() * 0.4); // a little human irregularity
+        fired = { eyeGS: eye, aimYaw: this.aimYaw, aimPitch: this.aimPitch, dmg: spec.dmg, spec };
+      }
     }
 
     this._updateGoal(navGraph, now, target ? target.originGS : null);

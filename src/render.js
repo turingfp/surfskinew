@@ -401,6 +401,10 @@ export function buildAnimatedModel(data, { remap = remapModelArray } = {}) {
     const key = 'b:' + moveSeq + ':' + moveFr + ':' + aimSeq + ':' + aimFr;
     let c = cache.get(key);
     if (!c) {
+      // Bound the baked-frame cache: move x upper frame combos (fire/reload
+      // anims across 17 weapons) would otherwise grow without limit over a
+      // long session. A full clear is crude but rebaking is cheap and lazy.
+      if (cache.size > 512) cache.clear();
       c = data.anim.bakeBlend(moveSeq, moveFr, aimSeq, aimFr).map((b) => ({ pos: remap(b.positions), nrm: remap(b.normals) }));
       cache.set(key, c);
     }
@@ -459,7 +463,10 @@ export function buildAnimatedModel(data, { remap = remapModelArray } = {}) {
     const base = ((moveFracFrame % nf) + nf) % nf;
     const f0 = Math.floor(base);
     const f1 = (f0 + 1) % nf;
-    writeFrames(frameBlend(moveSeq, f0, aimSeq, aimFrame), frameBlend(moveSeq, f1, aimSeq, aimFrame), base - f0);
+    // bakeBlend floors the aim frame anyway; floor here too so the cache key
+    // is an integer, not a per-frame-unique float that would never hit.
+    const af = Math.max(0, aimFrame | 0);
+    writeFrames(frameBlend(moveSeq, f0, aimSeq, af), frameBlend(moveSeq, f1, aimSeq, af), base - f0);
   }
   return { group, apply, applyBlend, modelMinY: minY };
 }

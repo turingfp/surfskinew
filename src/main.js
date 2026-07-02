@@ -326,18 +326,24 @@ function playerHitTest(eyeGS, dirGS) {
   return best;
 }
 
+// Kill-feed line: "Attacker ▸ Victim · WEAPON" (weapon omitted when unknown,
+// e.g. frags relayed by peers running an older build).
+function killLine(attacker, victim, weaponLabel) {
+  return `<b>${escHtml(attacker)}</b> ▸ ${escHtml(victim)}${weaponLabel ? ` <i>${escHtml(weaponLabel)}</i>` : ''}`;
+}
+
 // attackerBot: the Bot instance credited with the kill, or null/undefined
 // when the attacker is a bot but shouldn't be credited (e.g. remote net hit,
 // which is a real peer, not a bot — see net.on('hit', ...)).
-function applyDamage(dmg, by, attackerPos, attackerBot) {
+function applyDamage(dmg, by, attackerPos, attackerBot, weaponLabel) {
   if (input && input.noclip) return;
   if (attackerPos) showDamageDir(attackerPos);
   health -= dmg;
   if (health <= 0) {
     deaths++;
     if (attackerBot) attackerBot.kills++;
-    addKill(`<b>${escHtml(by)}</b> ▸ ${escHtml(playerName)}`);
-    if (net && net.connected) net.broadcastFrag({ by, victim: playerName });
+    addKill(killLine(by, playerName, weaponLabel));
+    if (net && net.connected) net.broadcastFrag({ by, victim: playerName, wl: weaponLabel });
     if (hud) hud.toast(`Fragged by ${escHtml(by)}`, '#ff6b6b');
     showDeathFlash();
     respawn(); // resets health to 100
@@ -347,10 +353,11 @@ function applyDamage(dmg, by, attackerPos, attackerBot) {
 // Apply damage to a bot and, if it dies, credit the kill + log it to the feed.
 // attackerBot is the shooting Bot, or null when the human player is the
 // shooter (credited to the player's own `kills` counter instead).
-function fragBotIfKilled(victim, dmg, attackerName, attackerBot) {
+function fragBotIfKilled(victim, dmg, attackerName, attackerBot, weaponLabel) {
   if (!victim.takeDamage(dmg)) return false;
   if (attackerBot) attackerBot.kills++; else kills++;
-  addKill(`<b>${escHtml(attackerName)}</b> ▸ ${escHtml(victim.name)}`);
+  addKill(killLine(attackerName, victim.name, weaponLabel));
+  if (remotePlayers) remotePlayers.die(victim.id); // corpse + death animation until respawn
   victim.respawnAt = gameClock + 3;
   return true;
 }
@@ -542,6 +549,7 @@ function tickBots(dt) {
     const fired = bot.think({ world, navGraph, dt, now: gameClock, target });
     if (fired) {
       if (weapons) weapons.remoteShot({ o: fired.eyeGS, y: fired.aimYaw, p: fired.aimPitch, w: bot.weaponId });
+      if (remotePlayers) remotePlayers.notifyShot(bot.id); // third-person fire animation
       const { forward } = angleVectors(fired.aimPitch, fired.aimYaw);
       const dir = jitterDir(forward, fired.spec.spread);
       // Hit-test against everyone else, not just whoever was targeted — the
@@ -557,8 +565,8 @@ function tickBots(dt) {
         if (dist != null && (!best || dist < best.dist)) best = { t, dist };
       }
       if (best) {
-        if (best.t.kind === 'player') applyDamage(fired.dmg, bot.name, bot.state.origin, bot);
-        else fragBotIfKilled(best.t.ref, fired.dmg, bot.name, bot);
+        if (best.t.kind === 'player') applyDamage(fired.dmg, bot.name, bot.state.origin, bot, fired.spec.label);
+        else fragBotIfKilled(best.t.ref, fired.dmg, bot.name, bot, fired.spec.label);
       }
     }
   }
@@ -699,7 +707,9 @@ function frame(nowMs) {
   // never networked, so this happens purely client-side.
   if (remotePlayers) {
     for (const [id, bot] of bots) {
-      if (bot.dead) { remotePlayers.remove(id); continue; }
+      // dead: leave the corpse playing its death animation (remotePlayers.die,
+      // called at the moment of death) until respawn revives it via update().
+      if (bot.dead) continue;
       remotePlayers.update(id, { o: bot.state.origin, y: bot.facingYaw, hp: bot.health, nm: bot.name, k: bot.kills, d: bot.deaths, pk: 0, w: bot.weaponId });
     }
   }
@@ -950,16 +960,16 @@ async function boot() {
     weapons.setWorld(world);
     weapons.masterVol = SETTINGS.vol / 100;
     weapons.playerHitTest = playerHitTest;
-    weapons.onPlayerHit = (id, dmg) => {
+    weapons.onPlayerHit = (id, dmg, label) => {
       if (hud) hud.hitMarker();
       const bot = bots.get(id);
       if (bot) {
-        if (fragBotIfKilled(bot, dmg, playerName, null)) {
+        if (fragBotIfKilled(bot, dmg, playerName, null, label)) {
           if (hud) hud.toast(`Fragged ${escHtml(bot.name)}`, '#7fd1ae');
         }
         return;
       }
-      if (net && net.connected) net.sendHitTo(id, { dmg, by: playerName });
+      if (net && net.connected) net.sendHitTo(id, { dmg, by: playerName, wl: label });
     };
     weapons.loadSounds({
       usp: 'assets/sounds/usp.wav', m4a1: 'assets/sounds/m4a1.wav', m3: 'assets/sounds/m3.wav',
@@ -987,14 +997,17 @@ async function boot() {
     net = new Net();
     net.on('state', (id, data) => remotePlayers.update(id, data));
     net.on('leave', (id) => remotePlayers.remove(id));
-    net.on('shot', (id, data) => { if (weapons) weapons.remoteShot(data); });
+    net.on('shot', (id, data) => {
+      if (weapons) weapons.remoteShot(data);
+      if (remotePlayers) remotePlayers.notifyShot(id); // third-person fire animation
+    });
     net.on('hit', (id, data) => {
       let attackerPos = null;
       if (remotePlayers) remotePlayers.forEach((pid, o) => { if (pid === id) attackerPos = o; });
-      applyDamage(data.dmg || 0, data.by || 'someone', attackerPos);
+      applyDamage(data.dmg || 0, data.by || 'someone', attackerPos, null, data.wl);
     });
     net.on('frag', (id, data) => {
-      addKill(`<b>${escHtml(data.by)}</b> ▸ ${escHtml(data.victim)}`);
+      addKill(killLine(data.by, data.victim, data.wl));
       if (data.by === playerName) kills++;
     });
     net.on('count', (n) => { const el = document.getElementById('peercount'); if (el) el.textContent = n; });
@@ -1197,7 +1210,7 @@ async function boot() {
       addTestAvatar: (o, y) => remotePlayers && remotePlayers.update('TESTBOT', { o, y: y || 0, nm: 'BOT' }), // static, non-AI, for avatar-rendering tests
       spawnBot: () => addBot(), // real AI bot; test hook so headless tests don't need the (room-gated) UI button
       clearBots: () => clearBots(),
-      botsInfo: () => ({ navReady: !!navGraph, navNodes: navGraph ? navGraph.nodes.length : 0, gameClock, kills, deaths, bots: [...bots.values()].map((b) => ({ id: b.id, name: b.name, o: [...b.state.origin], hp: b.health, dead: b.dead, kills: b.kills, deaths: b.deaths, weapon: b.weaponId, pathLen: b.path ? b.path.length : null, pathIdx: b.pathIdx, moveYaw: b.moveYaw, onground: b.state.onground, vel: [...b.state.velocity], respawnAt: b.respawnAt })) }),
+      botsInfo: () => ({ navReady: !!navGraph, navNodes: navGraph ? navGraph.nodes.length : 0, gameClock, kills, deaths, bots: [...bots.values()].map((b) => ({ id: b.id, name: b.name, o: [...b.state.origin], hp: b.health, dead: b.dead, kills: b.kills, deaths: b.deaths, weapon: b.weaponId, clip: b.clip, reloading: b._reloading, pathLen: b.path ? b.path.length : null, pathIdx: b.pathIdx, moveYaw: b.moveYaw, onground: b.state.onground, vel: [...b.state.velocity], respawnAt: b.respawnAt })) }),
       pickups: () => pickups.map((p) => ({ id: p.weaponId, o: [...p.origin] })),
       netInfo: () => ({
         connected: !!(net && net.connected),
